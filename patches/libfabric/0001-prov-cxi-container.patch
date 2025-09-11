@@ -1,0 +1,156 @@
+Subject: [PATCH] prov/cxi: add network namespace support for CXI services
+prov/cxi: move netdev_{link,speed,lookup} to query cxi_user instead of ethernet sysfs entries This adds support for running the CXI provider within a container.
+---
+Index: prov/cxi/src/cxip_if.c
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/prov/cxi/src/cxip_if.c b/prov/cxi/src/cxip_if.c
+--- a/prov/cxi/src/cxip_if.c	(revision cf173800a23505a0c6ec9ad42b935bde60a57da2)
++++ b/prov/cxi/src/cxip_if.c	(revision 7f10625aedb77d181fff086ad10430be1f330bbd)
+@@ -360,6 +360,23 @@
+ 	char state[20];
+ 	int carrier;
+ 
++	rc = snprintf(path, CXIP_PATH_MAX, "/sys/class/cxi_user/%s/device/properties/link",
++		      netdev);
++	if (rc < 0)
++		return -1;
++
++	f = fopen(path, "r");
++	if (!f)
++		return -1;
++
++	rc = fscanf(f, "%20s", state);
++
++	fclose(f);
++
++	if (!strncmp(state, "1", strlen("1"))) {
++		*link = 1;
++		return 0;
++	}
+ 	rc = snprintf(path, CXIP_PATH_MAX, "/sys/class/net/%s/operstate",
+ 		      netdev);
+ 	if (rc < 0)
+@@ -416,7 +433,7 @@
+ 	FILE *f;
+ 	int val;
+ 
+-	rc = snprintf(path, CXIP_PATH_MAX, "/sys/class/net/%s/speed",
++	rc = snprintf(path, CXIP_PATH_MAX, "/sys/class/cxi_user/%s/device/properties/speed",
+ 		      netdev);
+ 	if (rc < 0)
+ 		return -1;
+@@ -454,7 +471,7 @@
+ 	unsigned int dev;
+ 	unsigned int func;
+ 
+-	rc = glob("/sys/class/net/*", 0, NULL, &globbuf);
++	rc = glob("/sys/class/cxi_user/*", 0, NULL, &globbuf);
+ 	if (rc)
+ 		return -1;
+ 
+Index: prov/cxi/src/cxip_nic.c
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/prov/cxi/src/cxip_nic.c b/prov/cxi/src/cxip_nic.c
+--- a/prov/cxi/src/cxip_nic.c	(revision 7f10625aedb77d181fff086ad10430be1f330bbd)
++++ b/prov/cxi/src/cxip_nic.c	(revision 7f428d2e8016aff0e74c25bc557e41c2acc015c1)
+@@ -6,6 +6,7 @@
+ #include "cxip.h"
+ #include "ofi.h"
+ #include "ofi_str.h"
++#include <sys/stat.h>
+ 
+ #define CXIP_DBG(...) _CXIP_DBG(FI_LOG_FABRIC, __VA_ARGS__)
+ #define CXIP_WARN(...) _CXIP_WARN(FI_LOG_FABRIC, __VA_ARGS__)
+@@ -142,6 +143,33 @@
+ 	return FI_SUCCESS;
+ }
+ 
++/* Find current process' network namespace if available.
++ *
++ * Return 0 for success and value in *netns, or -1 for failure (no
++ * network namespace support, or can't locate it). In this case the
++ * *netns value is set to '0' which is the invalid inode/invalid netns
++ * value. */
++static
++	int cxip_process_network_namespace(unsigned int *netns)
++{
++	int ret;
++	struct stat file_stat;
++	ret = stat("/proc/self/ns/net", &file_stat);
++	if(ret<0) {
++		CXIP_INFO("failed to stat /proc/self/ns/net (no namespace support or none set?): %d:%s\n",
++			  errno, strerror(errno));
++		/* this is the 'invalid inode', so 'invalid netns' value */
++		*netns = 0;
++		goto out;
++	}
++	/* we use the inode as the namespace identifier */
++	*netns = file_stat.st_ino;
++	ret = 0;
++
++out:
++	return ret;
++}
++
+ static int cxip_nic_get_best_rgroup_vni(struct cxip_if *nic_if,
+ 					unsigned int *rgroup,
+ 					unsigned int *vni)
+@@ -150,16 +178,24 @@
+ 	struct cxil_svc_list *svc_list;
+ 	uid_t uid;
+ 	gid_t gid;
++	unsigned int netns;
+ 	int i;
+ 	int j;
+ 	struct cxi_svc_desc *desc;
+ 	int found_uid;
+ 	int found_gid;
++	int found_netns;
+ 	int found_unrestricted;
+ 
+ 	uid = geteuid();
+ 	gid = getegid();
+ 
++	ret = cxip_process_network_namespace(&netns);
++
++	if(ret < 0) {
++		CXIP_WARN("cxip_process_network_namespace failed, proceeding without network namespace support\n");
++	}
++
+ 	ret = cxil_get_svc_list(nic_if->dev, &svc_list);
+ 	if (ret) {
+ 		CXIP_WARN("cxil_get_svc_list failed: %d:%s\n", ret,
+@@ -174,6 +210,7 @@
+ 	 */
+ 	found_uid = -1;
+ 	found_gid = -1;
++	found_netns = -1;
+ 	found_unrestricted = -1;
+ 
+ 	for (i = svc_list->count - 1; i >= 0; i--) {
+@@ -197,6 +234,10 @@
+ 				 desc->members[j].svc_member.gid == gid &&
+ 				 found_gid == -1)
+ 				found_gid = i;
++			else if (desc->members[j].type == CXI_SVC_MEMBER_NET_NS &&
++				 desc->members[j].svc_member.netns == netns &&
++				 found_netns == -1)
++				found_netns = i;
+ 		}
+ 	}
+ 
+@@ -205,6 +246,8 @@
+ 		i = found_uid;
+ 	else if (found_gid != -1) {
+ 		i = found_gid;
++	} else if (found_netns != -1) {
++		i = found_netns;
+ 	} else if (found_unrestricted != -1) {
+ 		i = found_unrestricted;
+ 	} else {

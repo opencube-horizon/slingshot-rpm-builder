@@ -1,0 +1,129 @@
+Subject: [PATCH] Add support for network namespace service restrictions
+---
+Index: man/cxi_service.7.md
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/man/cxi_service.7.md b/man/cxi_service.7.md
+--- a/man/cxi_service.7.md	(revision 0ec826dbddfa3eb44840a1eb70bc370fd4948f44)
++++ b/man/cxi_service.7.md	(revision 4e5c83a590f76ff67742da1edfe56be978af0865)
+@@ -152,8 +152,8 @@
+ 
+ 2.1.1 **Restricting members**
+ 
+-A service can be allocated that limits access to specific UIDs or GIDs.
+-A combination of CXI_SVC_MAX_MEMBERS UIDs or GIDs may be provided.
++A service can be allocated that limits access to specific UIDs, GIDs, or network namespaces.
++A combination of CXI_SVC_MAX_MEMBERS UIDs, GIDs, or network namespaces may be provided.
+ To do so, set "restricted_members=1" and fill out the "members" structure.
+ 
+ ```
+@@ -162,6 +162,7 @@
+         union cxi_svc_member {
+                 __kernel_uid_t  uid;
+                 __kernel_gid_t  gid;
++				  unsigned int  netns;
+         } svc_member;
+         enum cxi_svc_member_type type;
+ } members[CXI_SVC_MAX_MEMBERS];
+@@ -173,6 +174,7 @@
+ 	CXI_SVC_MEMBER_IGNORE,
+ 	CXI_SVC_MEMBER_UID,
+ 	CXI_SVC_MEMBER_GID,
++	CXI_SVC_MEMBER_NET_NS,
+ 
+ 	CXI_SVC_MEMBER_MAX,
+ };
+Index: man/man7/cxi_service.7
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/man/man7/cxi_service.7 b/man/man7/cxi_service.7
+--- a/man/man7/cxi_service.7	(revision 0ec826dbddfa3eb44840a1eb70bc370fd4948f44)
++++ b/man/man7/cxi_service.7	(revision 4e5c83a590f76ff67742da1edfe56be978af0865)
+@@ -172,8 +172,8 @@
+ .PP
+ 2.1.1 \f[B]Restricting members\f[R]
+ .PP
+-A service can be allocated that limits access to specific UIDs or GIDs.
+-A combination of CXI_SVC_MAX_MEMBERS UIDs or GIDs may be provided.
++A service can be allocated that limits access to specific UIDs, GIDs, or network namespaces.
++A combination of CXI_SVC_MAX_MEMBERS UIDs, GIDs, or network namespaces may be provided.
+ To do so, set \[lq]restricted_members=1\[rq] and fill out the
+ \[lq]members\[rq] structure.
+ .IP
+@@ -184,6 +184,7 @@
+         union cxi_svc_member {
+                 __kernel_uid_t  uid;
+                 __kernel_gid_t  gid;
++		  unsigned int  netns;
+         } svc_member;
+         enum cxi_svc_member_type type;
+ } members[CXI_SVC_MAX_MEMBERS];
+@@ -197,6 +198,7 @@
+     CXI_SVC_MEMBER_IGNORE,
+     CXI_SVC_MEMBER_UID,
+     CXI_SVC_MEMBER_GID,
++    CXI_SVC_MEMBER_NET_NS,
+ 
+     CXI_SVC_MEMBER_MAX,
+ };
+Index: utils/cxi_service.c
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/utils/cxi_service.c b/utils/cxi_service.c
+--- a/utils/cxi_service.c	(revision 0ec826dbddfa3eb44840a1eb70bc370fd4948f44)
++++ b/utils/cxi_service.c	(revision 4e5c83a590f76ff67742da1edfe56be978af0865)
+@@ -113,6 +113,9 @@
+ 			else if (desc->members[i].type == CXI_SVC_MEMBER_GID)
+ 				printf(" gid=%u",
+ 				       desc->members[i].svc_member.gid);
++			else if (desc->members[i].type == CXI_SVC_MEMBER_NET_NS)
++				printf(" netns=%u",
++					   desc->members[i].svc_member.netns);
+ 		}
+ 	}
+ 	printf("\n");
+@@ -492,11 +495,19 @@
+ 					s->desc->members[s->member_idx].type = CXI_SVC_MEMBER_UID;
+ 				else if (strcmp(val, "gid") == 0)
+ 					s->desc->members[s->member_idx].type = CXI_SVC_MEMBER_GID;
++				else if (strcmp(val, "netns") == 0)
++					s->desc->members[s->member_idx].type = CXI_SVC_MEMBER_NET_NS;
+ 				else
+ 					errx(1, "Invalid input for Service Member 'type'\n");
+ 			} else if (strcmp(s->key, "id") == 0) {
+-				s->desc->members[s->member_idx].svc_member.gid =
+-					(uid_t)(atoi(val));
++				if(s->desc->members[s->member_idx].type == CXI_SVC_MEMBER_NET_NS) {
++					s->desc->members[s->member_idx].svc_member.netns =
++							strtoul(val, NULL, 10);
++				}
++				else {
++					s->desc->members[s->member_idx].svc_member.gid =
++							(uid_t)(atoi(val));
++				}
+ 				s->member_idx++;
+ 			} else if (strcmp(s->key, "vni") == 0) {
+ 				if (s->vni_idx >= CXI_SVC_MAX_VNIS)
+Index: utils/cxi_service_template.yaml
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/utils/cxi_service_template.yaml b/utils/cxi_service_template.yaml
+--- a/utils/cxi_service_template.yaml	(revision 0ec826dbddfa3eb44840a1eb70bc370fd4948f44)
++++ b/utils/cxi_service_template.yaml	(revision 4e5c83a590f76ff67742da1edfe56be978af0865)
+@@ -42,7 +42,7 @@
+ #
+ ## Ignored if restricted_members is set to false
+ members:
+-# Type can be 'uid' or 'gid'
++# Type can be 'uid', 'gid' or 'netns'
+   - type: uid
+     id: 1
+   - type: gid

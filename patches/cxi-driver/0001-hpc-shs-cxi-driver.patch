@@ -1,0 +1,73 @@
+diff --git a/cxi/cass_svc.c b/cxi/cass_svc.c
+index f8a070d..7251fd8 100644
+--- a/cxi/cass_svc.c
++++ b/cxi/cass_svc.c
+@@ -5,6 +5,7 @@
+ 
+ #include <linux/debugfs.h>
+ #include <linux/cred.h>
++#include <linux/sched.h>
+ 
+ #include "cass_core.h"
+ 
+@@ -64,13 +65,17 @@ bool valid_svc_user(const struct cxi_svc_priv *svc_priv)
+ 	kuid_t svc_euid;
+ 	kgid_t svc_egid;
+ 	kuid_t cur_euid = current_euid();
++	unsigned int task_nsinum;
++	bool ret=false;
++	struct task_struct* ct;
+ 
+ 	/* Service might not have any restrictions */
+ 	if (!svc_priv->svc_desc.restricted_members)
+ 		return true;
+ 
+ 	/* Ensure caller is authorized to allocate this resource */
+-	for (i = 0; i < CXI_SVC_MAX_MEMBERS; i++) {
++	for (i = 0; i < CXI_SVC_MAX_MEMBERS; i++) 
++	{
+ 		if (svc_priv->svc_desc.members[i].type == CXI_SVC_MEMBER_UID) {
+ 			svc_euid.val = svc_priv->svc_desc.members[i].svc_member.uid;
+ 			if (uid_eq(svc_euid, cur_euid))
+@@ -79,8 +84,20 @@ bool valid_svc_user(const struct cxi_svc_priv *svc_priv)
+ 			svc_egid.val = svc_priv->svc_desc.members[i].svc_member.gid;
+ 			if (in_egroup_p(svc_egid))
+ 				return true;
++		} 
++		else if (svc_priv->svc_desc.members[i].type == CXI_SVC_MEMBER_NET_NS) {
++			ct = current;
++			task_lock(ct);
++			if(ct->nsproxy && ct->nsproxy->net_ns) {
++				task_nsinum = ct->nsproxy->net_ns->ns.inum;
++				if(task_nsinum == svc_priv->svc_desc.members[i].svc_member.netns) {
++					ret=true;
++				}
++			}
++			task_unlock(ct);
++			return ret;
+ 		}
+-	}
++    }
+ 
+ 	return false;
+ }
+diff --git a/include/uapi/misc/cxi.h b/include/uapi/misc/cxi.h
+index 7021332..519d20b 100644
+--- a/include/uapi/misc/cxi.h
++++ b/include/uapi/misc/cxi.h
+@@ -852,6 +852,7 @@ enum cxi_svc_member_type {
+ 	CXI_SVC_MEMBER_IGNORE,
+ 	CXI_SVC_MEMBER_UID,
+ 	CXI_SVC_MEMBER_GID,
++        CXI_SVC_MEMBER_NET_NS,
+ 
+ 	CXI_SVC_MEMBER_MAX,
+ };
+@@ -912,6 +913,7 @@ struct cxi_svc_desc {
+ 		union cxi_svc_member {
+ 			__kernel_uid_t  uid;
+ 			__kernel_gid_t  gid;
++	        unsigned int  netns;
+ 		} svc_member;
+ 		enum cxi_svc_member_type type;
+ 	} members[CXI_SVC_MAX_MEMBERS];
