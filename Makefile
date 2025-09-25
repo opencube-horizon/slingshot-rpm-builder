@@ -59,7 +59,7 @@ all:
 # also, do not use MAKEFLAGS since the outside make and the inside might not be compatible
 # NOTE: if you want to avoid refetching, bind-mount the src/ directory
 
-prepare: cassini-headers sl-driver cxi-driver firmware_cassini slingshot_base_link
+prepare: src/cassini-headers src/sl-driver src/cxi-driver src/firmware_cassini src/slingshot_base_link
 
 # libfabric automatically pulls all the others
 build: libfabric-rpm
