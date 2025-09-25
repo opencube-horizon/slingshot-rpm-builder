@@ -1,10 +1,13 @@
 
-.PHONY: all prepare build
+.PHONY: all prepare build pkgs
 
 SHS_VER := 12.0.1
 FIRMWARE_CASSINI_REF := 756565798aa61f114bb1c2c9af342931711e5a5e
 BASE_LINK_REF := 69282a99fb6301dce5399ca15190a0c39f5c7c04
 LIBFABRIC_REF := refs/heads/main
+
+REGISTRY_AND_PROJECT :=
+PUSH := false
 
 ARCH := $(shell uname -m)
 # or should we use `uname -p`, or `arch`?
@@ -48,21 +51,26 @@ libfabric_ver = $(shell grep -oP '^AC_INIT[^\d]+\K[^\]]+' src/libfabric/configur
 pkg_ver = $(firstword $(subst -, ,$*))
 pkg_rev = $(lastword $(subst -, ,$*))
 
-all:
-	docker build -t slingshot-container-builder .
+all: pkgs runtime
+
+pkgs:
+	docker build -f ./Dockerfile.builder -t $(REGISTRY_AND_PROJECT)slingshot-container-builder .
 	mkdir -p RPMS
 	docker run -ti --rm $(DOCKEROPTS) \
 		-v "$(PROJECT_DIR)/RPMS/:/build/rpmbuild/RPMS" \
-		slingshot-container-builder:latest \
-		make build $(MAKEOPTS)
+		$(REGISTRY_AND_PROJECT)slingshot-container-builder:latest \
+		make libfabric-rpm $(MAKEOPTS)
+# libfabric automatically pulls all the others
 # do not use $(MAKE) to avoid setting make level variables
 # also, do not use MAKEFLAGS since the outside make and the inside might not be compatible
 # NOTE: if you want to avoid refetching, bind-mount the src/ directory
 
-prepare: src/cassini-headers src/sl-driver src/cxi-driver src/firmware_cassini src/slingshot_base_link
+runtime: RPMS
+	docker buildx build -f ./Dockerfile.runtime -t $(REGISTRY_AND_PROJECT)slingshot-container-runtime . --push=$(PUSH) --provenance false
 
-# libfabric automatically pulls all the others
-build: libfabric-rpm
+RPMS: pkgs
+
+prepare: src/cassini-headers src/sl-driver src/cxi-driver src/firmware_cassini src/slingshot_base_link
 
 src/cassini-headers:
 	mkdir -p "$@"
