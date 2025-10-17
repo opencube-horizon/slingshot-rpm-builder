@@ -7,6 +7,9 @@ RUN --mount=type=cache,target=/var/cache/zypp --mount=type=bind,source=RPMS/,tar
   zypper --non-interactive install \
     hwloc \
     kmod \
+    lldpd \
+    jq \
+    iputils \
     ; \
   zypper --non-interactive --no-gpg-checks install \
     /tmp/RPMS/$(uname -m)/cray-libcxi-1.0.2-0.$(uname -m).rpm \
