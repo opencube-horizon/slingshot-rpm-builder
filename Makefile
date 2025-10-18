@@ -5,6 +5,7 @@ SHS_VER := 12.0.1
 FIRMWARE_CASSINI_REF := 756565798aa61f114bb1c2c9af342931711e5a5e
 BASE_LINK_REF := 69282a99fb6301dce5399ca15190a0c39f5c7c04
 LIBFABRIC_REF := refs/heads/main
+LUSTRE_VER := 2.16.1
 
 REGISTRY_AND_PROJECT :=
 PUSH := false
@@ -40,12 +41,17 @@ ifeq ($(LIBCXI_REF),)
 LIBCXI_REF := refs/tags/release/shs-$(SHS_VER)
 endif
 
+ifeq ($(KFABRIC_REF),)
+KFABRIC_REF := refs/tags/release/shs-$(SHS_VER)
+endif
+
 firmware_cassini_ver = $(shell awk '/^Version:/ {print $$2;}' src/firmware_cassini/cassini2-firmware-devel.spec)
 cassini_headers_ver = $(shell awk '/^Version:/ {print $$2;}' src/cassini-headers/cray-cassini-headers-public.spec)
 sl_driver_ver = $(shell awk '/^Version:/ {print $$2;}' src/sl-driver/sl-driver.spec)
 slingshot_base_link_ver = $(shell awk '/^Version:/ {print $$2;}' src/slingshot_base_link/cray-slingshot-base-link.spec)
 cxi_driver_ver = $(shell awk '/^Version:/ {print $$2;}' src/cxi-driver/cray-cxi-driver.spec)
 libcxi_ver = $(shell awk '/^Version:/ {print $$2;}' src/libcxi/cray-libcxi.spec)
+kfabric_ver = $(shell awk '/^Version:/ {print $$2;}' src/kfabric/cray-kfabric.spec)
 libfabric_ver = $(shell grep -oP '^AC_INIT[^\d]+\K[^\]]+' src/libfabric/configure.ac 2>/dev/null)
 
 pkg_ver = $(firstword $(subst -, ,$*))
@@ -54,12 +60,12 @@ pkg_rev = $(lastword $(subst -, ,$*))
 all: pkgs runtime
 
 pkgs:
-	docker build -f ./Dockerfile.builder -t $(REGISTRY_AND_PROJECT)slingshot-container-builder .
+	docker buildx build -f ./Dockerfile.builder -t $(REGISTRY_AND_PROJECT)slingshot-container-builder .
 	mkdir -p RPMS
 	docker run -ti --rm $(DOCKEROPTS) \
 		-v "$(PROJECT_DIR)/RPMS/:/build/rpmbuild/RPMS" \
 		$(REGISTRY_AND_PROJECT)slingshot-container-builder:latest \
-		make libfabric-rpm $(MAKEOPTS)
+		make libfabric-rpm lustre-rpm $(MAKEOPTS)
 # libfabric automatically pulls all the others
 # do not use $(MAKE) to avoid setting make level variables
 # also, do not use MAKEFLAGS since the outside make and the inside might not be compatible
@@ -70,7 +76,7 @@ runtime: RPMS
 
 RPMS: pkgs
 
-prepare: src/cassini-headers src/sl-driver src/cxi-driver src/firmware_cassini src/slingshot_base_link
+prepare: src/cassini-headers src/sl-driver src/cxi-driver src/firmware_cassini src/slingshot_base_link src/kfabric
 
 src/cassini-headers:
 	mkdir -p "$@"
@@ -101,6 +107,11 @@ src/slingshot_base_link:
 src/libcxi:
 	mkdir -p "$@"
 	curl -L "https://github.com/HewlettPackard/shs-libcxi/archive/$(LIBCXI_REF).tar.gz" | tar -xz --strip-components=1 -C "$@"
+	find patches -ipath '$(patsubst src/%,patches/%,$@)/*.patch' | sort | xargs -I{} sh -c 'echo "Applying: {}"; patch -d $@ -p1 < "{}"'
+
+src/kfabric:
+	mkdir -p "$@"
+	curl -L "https://github.com/HewlettPackard/shs-kfabric/archive/$(KFABRIC_REF).tar.gz" | tar -xz --strip-components=1 -C "$@"
 	find patches -ipath '$(patsubst src/%,patches/%,$@)/*.patch' | sort | xargs -I{} sh -c 'echo "Applying: {}"; patch -d $@ -p1 < "{}"'
 
 src/libfabric:
@@ -182,6 +193,17 @@ rpmbuild/RPMS/$(ARCH)/cray-libcxi-%.$(ARCH).rpm:
 	tar --transform "s,^src/libcxi/,libcxi-$(pkg_ver)/," -cf "rpmbuild/SOURCES/libcxi-$(pkg_ver).tar.gz" src/libcxi
 	env -i BUILD_METADATA="$(pkg_rev)" PATH="$(PATH)" rpmbuild --define "_topdir $(CURDIR)/rpmbuild" -ba src/libcxi/cray-libcxi.spec
 
+kfabric-rpm: src/kfabric libcxi-install cxi-driver-install
+	$(MAKE) "rpmbuild/RPMS/$(ARCH)/cray-kfabric-devel-$(kfabric_ver)-0.$(ARCH).rpm"
+
+kfabric-install: kfabric-rpm
+	rpm -i "rpmbuild/RPMS/$(ARCH)/cray-kfabric-devel-$(kfabric_ver)-0.$(ARCH).rpm"
+
+rpmbuild/RPMS/$(ARCH)/cray-kfabric-devel-%.$(ARCH).rpm:
+	mkdir -p rpmbuild/SOURCES "rpmbuild/RPMS/$(ARCH)"
+	tar --transform "s,^src/kfabric/,cray-kfabric-$(pkg_ver)/," -cf "rpmbuild/SOURCES/cray-kfabric-$(pkg_ver).tar.gz" src/kfabric
+	env -i BUILD_METADATA="$(pkg_rev)" PATH="$(PATH)" rpmbuild --define "_topdir $(CURDIR)/rpmbuild" -ba src/kfabric/cray-kfabric.spec
+
 libfabric-rpm: src/libfabric libcxi-install cassini-headers-install
 	$(MAKE) "rpmbuild/RPMS/$(ARCH)/libfabric-$(libfabric_ver)-1.$(ARCH).rpm"
 
@@ -190,3 +212,16 @@ rpmbuild/RPMS/$(ARCH)/libfabric-%.$(ARCH).rpm:
 	cd src/libfabric && ./autogen.sh && ./configure && make dist
 	cp "src/libfabric/libfabric-$(pkg_ver).tar.bz2" rpmbuild/SOURCES/
 	env -i PATH="$(PATH)" rpmbuild --define "_topdir $(CURDIR)/rpmbuild" -ba src/libfabric/libfabric.spec
+
+rpmbuild/RPMS/lustre-$(LUSTRE_VER)-1.src.rpm:
+	mkdir -p rpmbuild/RPMS
+	cd rpmbuild/RPMS && curl -OL https://downloads.whamcloud.com/public/lustre/latest-feature-release/sles15sp6/client/SRPMS/lustre-$(LUSTRE_VER)-1.src.rpm
+
+lustre-rpm: SHELL := bash -l
+lustre-rpm: rpmbuild/RPMS/lustre-$(LUSTRE_VER)-1.src.rpm kfabric-install
+	rpm -i rpmbuild/RPMS/lustre-$(LUSTRE_VER)-1.src.rpm
+	rpmbuild -ba /usr/src/packages/SPECS/lustre.spec \
+	  --without servers --without l_getsepol \
+	  --define "kver $(shell basename /lib/modules/*-default)" \
+	  --with kfi
+	cp -rv /usr/src/packages/RPMS/$(shell uname -m) rpmbuild/RPMS/
