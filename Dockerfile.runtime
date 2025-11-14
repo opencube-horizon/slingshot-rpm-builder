@@ -1,4 +1,4 @@
-FROM opensuse/leap:15.6
+FROM opensuse/leap:16.0
 
 RUN --mount=type=cache,target=/var/cache/zypp --mount=type=bind,source=RPMS/,target=/tmp/RPMS \
   set -ex ; \
@@ -14,4 +14,4 @@ RUN --mount=type=cache,target=/var/cache/zypp --mount=type=bind,source=RPMS/,tar
   zypper --non-interactive --no-gpg-checks install \
     /tmp/RPMS/$(uname -m)/cray-libcxi-1.0.2-0.$(uname -m).rpm \
     /tmp/RPMS/$(uname -m)/cray-libcxi-utils-1.0.2-0.$(uname -m).rpm \
-    /tmp/RPMS/$(uname -m)/libfabric-2.3.0rc1-1.$(uname -m).rpm
+    /tmp/RPMS/$(uname -m)/libfabric-2.4.0a1-1.$(uname -m).rpm
