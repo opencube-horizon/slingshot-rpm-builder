@@ -1,6 +1,6 @@
 # slingshot-rpm-builder
 
-Single container and makefile to build Slingshot Host Software RPM packages (currently for OpenSUSE Leap 15.6 only).
+Single container and makefile to build Slingshot Host Software RPM packages (currently for OpenSUSE Leap 16.0 only).
 
 ## Requirements
 
