@@ -31,6 +31,9 @@ RUN --mount=type=cache,target=/var/cache/zypp \
 
 RUN /usr/lib/build/finalize-system/11-hack_uname_version_to_kernel_version
 
+# work around https://bugzilla.opensuse.org/show_bug.cgi?id=1238724 until the fix is pushed out
+RUN rm /etc/rpm/macros.leap
+
 # createrepo_c: required for repo file creation
 RUN --mount=type=cache,target=/var/cache/zypp \
   set -ex ; \
