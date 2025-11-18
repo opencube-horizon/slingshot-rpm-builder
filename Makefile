@@ -83,7 +83,17 @@ pkgs:
 		-v "$(PROJECT_DIR)/RPMS/:/build/rpmbuild/RPMS" \
 		$(REGISTRY_AND_PROJECT)slingshot-container-builder:latest \
 		make $(PKGS) rpmbuild/RPMS/repodata/repomd.xml $(MAKEOPTS)
-# libfabric automatically pulls all the others
+# do not use $(MAKE) to avoid setting make level variables
+# also, do not use MAKEFLAGS since the outside make and the inside might not be compatible
+# NOTE: if you want to avoid refetching, bind-mount the src/ directory
+
+interactive:
+	docker buildx build -f ./Dockerfile.builder -t $(REGISTRY_AND_PROJECT)slingshot-container-builder .
+	mkdir -p RPMS
+	docker run -ti --rm $(DOCKEROPTS) \
+		-v "$(PROJECT_DIR)/RPMS/:/build/rpmbuild/RPMS" \
+		$(REGISTRY_AND_PROJECT)slingshot-container-builder:latest \
+		/bin/bash -l
 # do not use $(MAKE) to avoid setting make level variables
 # also, do not use MAKEFLAGS since the outside make and the inside might not be compatible
 # NOTE: if you want to avoid refetching, bind-mount the src/ directory
@@ -165,7 +175,7 @@ cassini-headers-rpm: src/cassini-headers
 	$(MAKE) rpmbuild/RPMS/noarch/cray-cassini-headers-user-$(cassini_headers_ver)-0.noarch.rpm
 
 cassini-headers-install: cassini-headers-rpm
-	rpm -i \
+	rpm -i --force \
 		"rpmbuild/RPMS/noarch/cray-cassini-headers-user-$(cassini_headers_ver)-0.noarch.rpm" \
 		"rpmbuild/RPMS/noarch/cray-cassini-csr-defs-$(cassini_headers_ver)-0.noarch.rpm"
 
@@ -178,7 +188,7 @@ sl-driver-rpm: src/sl-driver cassini-headers-rpm
 	$(MAKE) "rpmbuild/RPMS/$(ARCH)/sl-driver-$(sl_driver_ver)-0.$(ARCH).rpm"
 
 sl-driver-install: sl-driver-rpm
-	rpm -i "rpmbuild/RPMS/$(ARCH)/sl-driver-devel-$(sl_driver_ver)-0.$(ARCH).rpm"
+	rpm -i --force "rpmbuild/RPMS/$(ARCH)/sl-driver-devel-$(sl_driver_ver)-0.$(ARCH).rpm"
 
 rpmbuild/RPMS/$(ARCH)/sl-driver-%.$(ARCH).rpm:
 	mkdir -p rpmbuild/SOURCES "rpmbuild/RPMS/$(ARCH)"
@@ -190,7 +200,7 @@ slingshot_base_link-rpm: src/slingshot_base_link cassini-headers-install
 	$(MAKE) rpmbuild/RPMS/$(ARCH)/cray-slingshot-base-link-devel-$(slingshot_base_link_ver)-0.$(ARCH).rpm
 
 slingshot_base_link-install: slingshot_base_link-rpm
-	rpm -i "rpmbuild/RPMS/$(ARCH)/cray-slingshot-base-link-devel-$(slingshot_base_link_ver)-0.$(ARCH).rpm"
+	rpm -i --force "rpmbuild/RPMS/$(ARCH)/cray-slingshot-base-link-devel-$(slingshot_base_link_ver)-0.$(ARCH).rpm"
 
 rpmbuild/RPMS/$(ARCH)/cray-slingshot-base-link-devel-%.$(ARCH).rpm:
 	mkdir -p rpmbuild/SOURCES "rpmbuild/RPMS/$(ARCH)"
@@ -203,7 +213,7 @@ cxi-driver-rpm: src/cxi-driver cassini-headers-install slingshot_base_link-insta
 	$(MAKE) "rpmbuild/RPMS/$(ARCH)/cray-cxi-driver-devel-$(cxi_driver_ver)-0.$(ARCH).rpm"
 
 cxi-driver-install: cxi-driver-rpm
-	rpm -i "rpmbuild/RPMS/$(ARCH)/cray-cxi-driver-devel-$(cxi_driver_ver)-0.$(ARCH).rpm"
+	rpm -i --force "rpmbuild/RPMS/$(ARCH)/cray-cxi-driver-devel-$(cxi_driver_ver)-0.$(ARCH).rpm"
 
 rpmbuild/RPMS/$(ARCH)/cray-cxi-driver-devel-%.$(ARCH).rpm:
 	mkdir -p rpmbuild/SOURCES "rpmbuild/RPMS/$(ARCH)"
@@ -214,7 +224,7 @@ libcxi-rpm: src/libcxi cassini-headers-install cxi-driver-install firmware_cassi
 	$(MAKE) "rpmbuild/RPMS/$(ARCH)/cray-libcxi-$(libcxi_ver)-0.$(ARCH).rpm"
 
 libcxi-install: libcxi-rpm
-	rpm -i \
+	rpm -i --force \
 		"rpmbuild/RPMS/$(ARCH)/cray-libcxi-$(libcxi_ver)-0.$(ARCH).rpm" \
 		"rpmbuild/RPMS/$(ARCH)/cray-libcxi-devel-$(libcxi_ver)-0.$(ARCH).rpm"
 
@@ -224,14 +234,13 @@ rpmbuild/RPMS/$(ARCH)/cray-libcxi-%.$(ARCH).rpm:
 	env -i BUILD_METADATA="$(pkg_rev)" PATH="$(PATH)" \
 	  rpmbuild \
 	  --define "_topdir $(CURDIR)/rpmbuild" \
-	  --define "sle_version %{suse_version}*1000" \
 	  -ba src/libcxi/cray-libcxi.spec
 
 kfabric-rpm: src/kfabric libcxi-install cxi-driver-install
 	$(MAKE) "rpmbuild/RPMS/$(ARCH)/cray-kfabric-devel-$(kfabric_ver)-0.$(ARCH).rpm"
 
 kfabric-install: kfabric-rpm
-	rpm -i "rpmbuild/RPMS/$(ARCH)/cray-kfabric-devel-$(kfabric_ver)-0.$(ARCH).rpm"
+	rpm -i --force "rpmbuild/RPMS/$(ARCH)/cray-kfabric-devel-$(kfabric_ver)-0.$(ARCH).rpm"
 
 rpmbuild/RPMS/$(ARCH)/cray-kfabric-devel-%.$(ARCH).rpm:
 	mkdir -p rpmbuild/SOURCES "rpmbuild/RPMS/$(ARCH)"
@@ -261,17 +270,12 @@ lustre-rpm: src/lustre kfabric-install
 	mkdir -p rpmbuild/SOURCES "rpmbuild/RPMS/$(ARCH)"
 	cd src/lustre && ./autogen.sh && ./configure --enable-dist && make dist
 	cp src/lustre/rpm/* "src/lustre/lustre-$(LUSTRE_VER).tar.gz" rpmbuild/SOURCES/
-	# The definition of the sle_version macro is required per openSUSE Leap 16.0,
-	# see https://en.opensuse.org/openSUSE:Build_Service_cross_distribution_howto#Detect_a_distribution_flavor_for_special_code
 	# The newer compiler chokes on the missing prototypes.
-	# And openSUSE Leap 16.0 now always generates debuginfo packages, leading to a duplicate package if debug_package is defined.
 	sed -i \
 	  -e 's|-Werror|-Werror -Wno-error=missing-prototypes|' \
-	  -e '/%debug_package/d' \
 	  src/lustre/lustre.spec
 	rpmbuild \
 	  --define "_topdir $(CURDIR)/rpmbuild" \
-	  --define "sle_version %{suse_version}*1000" \
 	  -ba src/lustre/lustre.spec \
 	  --without servers --without l_getsepol \
 	  --define "kver $(notdir $(wildcard /lib/modules/*-default))" \
