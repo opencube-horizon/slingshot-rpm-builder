@@ -1,5 +1,7 @@
 FROM registry.opensuse.org/opensuse/leap:16.0
 
+# post-build-checks: required to get the uname hack script
+# gcc13: libcxi is broken with gcc15
 # kernel-default: required to get the vmlinuz image and the kernel modules
 # fuse-devel..system-devel: required to build libcxi
 # libcurl-devel..libjson-c-devel: required to build libfabric with cxi provider
@@ -12,6 +14,7 @@ RUN --mount=type=cache,target=/var/cache/zypp \
     -t pattern devel_{C_C++,kernel,rpm_build} ; \
   zypper --non-interactive install \
     post-build-checks \
+    gcc13 \
     kernel-default \
     fuse-devel \
     libconfig-devel \
@@ -33,6 +36,9 @@ RUN /usr/lib/build/finalize-system/11-hack_uname_version_to_kernel_version
 
 # work around https://bugzilla.opensuse.org/show_bug.cgi?id=1238724 until the fix is pushed out
 RUN rm /etc/rpm/macros.leap
+
+# make gcc-13 the default compiler for libcxi (and to match the kernel)
+RUN for e in cc cpp gcc{,-ar,-nm,-ranlib} ; do ln -sf $e-13 /usr/bin/$e ; done
 
 # createrepo_c: required for repo file creation
 RUN --mount=type=cache,target=/var/cache/zypp \
