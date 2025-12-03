@@ -105,7 +105,9 @@ src/%:
 .PHONY: check-availabilities
 check-availabilities: $(patsubst src/%,check-availability/%,$(SRC_DIRS))
 check-availability/%:
-	curl -sfIL "https://github.com/$(REPO_$(notdir $@))/archive/$(REF_$(notdir $@)).tar.gz" >/dev/null
+	@curl -sfIL "https://github.com/$(REPO_$(notdir $@))/archive/$(REF_$(notdir $@)).tar.gz" >/dev/null \
+		&& echo "✅ https://github.com/$(REPO_$(notdir $@))/archive/$(REF_$(notdir $@)).tar.gz" \
+		|| echo "❌ https://github.com/$(REPO_$(notdir $@))/archive/$(REF_$(notdir $@)).tar.gz"
 
 firmware_cassini-rpm: src/firmware_cassini
 	# use make call to have firmware_cassini_ver available when starting this rule
