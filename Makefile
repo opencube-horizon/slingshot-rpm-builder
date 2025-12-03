@@ -2,10 +2,21 @@
 .PHONY: all prepare build pkgs
 
 SHS_VER := 12.0.1
-FIRMWARE_CASSINI_REF := 756565798aa61f114bb1c2c9af342931711e5a5e
-BASE_LINK_REF := 69282a99fb6301dce5399ca15190a0c39f5c7c04
-LIBFABRIC_REF := refs/heads/main
+REF_firmware_cassini := 756565798aa61f114bb1c2c9af342931711e5a5e
+REF_slingshot_base_link := 69282a99fb6301dce5399ca15190a0c39f5c7c04
+REF_libfabric := refs/heads/main
 LUSTRE_VER := 2.16.61
+
+REPO_cassini-headers     := HewlettPackard/shs-cassini-headers
+REPO_sl-driver           := HewlettPackard/ss-link
+REPO_cxi-driver          := HewlettPackard/shs-cxi-driver
+REPO_firmware_cassini    := HewlettPackard/shs-firmware-cassini2-devel
+REPO_slingshot_base_link := HewlettPackard/ss-sbl
+REPO_libcxi              := HewlettPackard/shs-libcxi
+REPO_kfabric             := HewlettPackard/shs-kfabric
+REPO_network-config      := HewlettPackard/shs-network-config
+REPO_libfabric           := HewlettPackard/shs-libfabric
+REPO_lustre              := lustre/lustre-release
 
 REGISTRY_AND_PROJECT :=
 PUSH := false
@@ -17,50 +28,30 @@ PROJECT_DIR := $(CURDIR)
 
 # TODO: package revisions are currently hardcoded
 
-ifeq ($(FIRMWARE_CASSINI_REF),)
-FIRMWARE_CASSINI_REF := refs/tags/release/shs-$(SHS_VER)
+SHS_COMPONENTS := \
+  firmware_cassini \
+  slingshot_base_link \
+  cassini-headers \
+  sl-driver \
+  cxi-driver \
+  libcxi \
+  kfabric \
+  network-config
+
+# Set default refs only if not already set
+$(foreach c,$(SHS_COMPONENTS),\
+  $(if $(REF_$(c)),,$(eval REF_$(c) := refs/tags/release/shs-$(SHS_VER)))\
+)
+
+# Lustre has a different default
+ifeq ($(REF_lustre),)
+REF_lustre := refs/tags/$(LUSTRE_VER)
 endif
 
-ifeq ($(BASE_LINK_REF),)
-BASE_LINK_REF := refs/tags/release/shs-$(SHS_VER)
-endif
+PKGS := $(addsuffix -rpm,$(SHS_COMPONENTS)) lustre-rpm
+SRC_DIRS := $(addprefix src/,$(SHS_COMPONENTS)) src/lustre
 
-ifeq ($(CASSINI_HEADERS_REF),)
-CASSINI_HEADERS_REF := refs/tags/release/shs-$(SHS_VER)
-endif
-
-ifeq ($(SL_DRIVER_REF),)
-SL_DRIVER_REF := refs/tags/release/shs-$(SHS_VER)
-endif
-
-ifeq ($(CXI_DRIVER_REF),)
-CXI_DRIVER_REF := refs/tags/release/shs-$(SHS_VER)
-endif
-
-ifeq ($(LIBCXI_REF),)
-LIBCXI_REF := refs/tags/release/shs-$(SHS_VER)
-endif
-
-ifeq ($(KFABRIC_REF),)
-KFABRIC_REF := refs/tags/release/shs-$(SHS_VER)
-endif
-
-ifeq ($(NETWORK_CONFIG_REF),)
-NETWORK_CONFIG_REF := refs/tags/release/shs-$(SHS_VER)
-endif
-
-PKGS := \
-	cassini-headers-rpm \
-	cxi-driver-rpm \
-	firmware_cassini-rpm \
-	kfabric-rpm \
-	libcxi-rpm \
-	libfabric-rpm \
-	lustre-rpm \
-	sl-driver-rpm \
-	slingshot_base_link-rpm \
-	network-config-rpm
-
+# The components have their own versions, extract them here
 firmware_cassini_ver = $(shell awk '/^Version:/ {print $$2;}' src/firmware_cassini/cassini2-firmware-devel.spec)
 cassini_headers_ver = $(shell awk '/^Version:/ {print $$2;}' src/cassini-headers/cray-cassini-headers-public.spec)
 sl_driver_ver = $(shell awk '/^Version:/ {print $$2;}' src/sl-driver/sl-driver.spec)
@@ -94,68 +85,27 @@ interactive:
 		-v "$(PROJECT_DIR)/RPMS/:/build/rpmbuild/RPMS" \
 		$(REGISTRY_AND_PROJECT)slingshot-container-builder:latest \
 		/bin/bash -l
-# do not use $(MAKE) to avoid setting make level variables
-# also, do not use MAKEFLAGS since the outside make and the inside might not be compatible
-# NOTE: if you want to avoid refetching, bind-mount the src/ directory
 
 runtime: RPMS
 	docker buildx build -f ./Dockerfile.runtime -t $(REGISTRY_AND_PROJECT)slingshot-container-runtime . --push=$(PUSH) --provenance false
 
 RPMS: pkgs
 
-prepare: src/cassini-headers src/sl-driver src/cxi-driver src/firmware_cassini src/slingshot_base_link src/kfabric
+.PHONY: prepare
+prepare: $(SRC_DIRS)
 
-src/cassini-headers:
+src/%:
 	mkdir -p "$@"
-	curl -L "https://github.com/HewlettPackard/shs-cassini-headers/archive/$(CASSINI_HEADERS_REF).tar.gz" | tar -xz --strip-components=1 -C "$@"
-	find patches -ipath '$(patsubst src/%,patches/%,$@)/*.patch' | sort | xargs -I{} sh -c 'echo "Applying: {}"; patch -d $@ -p1 < "{}"'
+	curl -L "https://github.com/$(REPO_$(notdir $@))/archive/$(REF_$(notdir $@)).tar.gz" \
+		| tar -xz --strip-components=1 -C "$@"
+	find patches -ipath '$(patsubst src/%,patches/%,$@)/*.patch' \
+		| sort \
+		| xargs -I{} sh -c 'echo "Applying: {}"; patch -d $@ -p1 < "{}"'
 
-src/sl-driver:
-	mkdir -p "$@"
-	curl -L "https://github.com/HewlettPackard/ss-link/archive/$(SL_DRIVER_REF).tar.gz" | tar -xz --strip-components=1 -C "$@"
-	find patches -ipath '$(patsubst src/%,patches/%,$@)/*.patch' | sort | xargs -I{} sh -c 'echo "Applying: {}"; patch -d $@ -p1 < "{}"'
-
-src/cxi-driver:
-	mkdir -p "$@"
-	curl -L "https://github.com/HewlettPackard/shs-cxi-driver/archive/$(CXI_DRIVER_REF).tar.gz" | tar -xz --strip-components=1 -C "$@"
-	find patches -ipath '$(patsubst src/%,patches/%,$@)/*.patch' | sort | xargs -I{} sh -c 'echo "Applying: {}"; patch -d $@ -p1 < "{}"'
-
-src/firmware_cassini:
-	mkdir -p "$@"
-	curl -L "https://github.com/HewlettPackard/shs-firmware-cassini2-devel/archive/$(FIRMWARE_CASSINI_REF).tar.gz" | tar -xz --strip-components=1 -C "$@"
-	chmod +x src/firmware_cassini/build-rpm.sh
-	find patches -ipath '$(patsubst src/%,patches/%,$@)/*.patch' | sort | xargs -I{} sh -c 'echo "Applying: {}"; patch -d $@ -p1 < "{}"'
-
-src/slingshot_base_link:
-	mkdir -p "$@"
-	curl -L "https://github.com/HewlettPackard/ss-sbl/archive/$(BASE_LINK_REF).tar.gz" | tar -xz --strip-components=1 -C "$@"
-	find patches -ipath '$(patsubst src/%,patches/%,$@)/*.patch' | sort | xargs -I{} sh -c 'echo "Applying: {}"; patch -d $@ -p1 < "{}"'
-
-src/libcxi:
-	mkdir -p "$@"
-	curl -L "https://github.com/HewlettPackard/shs-libcxi/archive/$(LIBCXI_REF).tar.gz" | tar -xz --strip-components=1 -C "$@"
-	find patches -ipath '$(patsubst src/%,patches/%,$@)/*.patch' | sort | xargs -I{} sh -c 'echo "Applying: {}"; patch -d $@ -p1 < "{}"'
-
-src/kfabric:
-	mkdir -p "$@"
-	curl -L "https://github.com/HewlettPackard/shs-kfabric/archive/$(KFABRIC_REF).tar.gz" | tar -xz --strip-components=1 -C "$@"
-	find patches -ipath '$(patsubst src/%,patches/%,$@)/*.patch' | sort | xargs -I{} sh -c 'echo "Applying: {}"; patch -d $@ -p1 < "{}"'
-
-src/network-config:
-	mkdir -p "$@"
-	curl -L "https://github.com/HewlettPackard/shs-network-config/archive/$(KFABRIC_REF).tar.gz" | tar -xz --strip-components=1 -C "$@"
-	find patches -ipath '$(patsubst src/%,patches/%,$@)/*.patch' | sort | xargs -I{} sh -c 'echo "Applying: {}"; patch -d $@ -p1 < "{}"'
-
-src/libfabric:
-	mkdir -p "$@"
-	# the master is usually up-to-date with upstream libfabric, but we might want/need another branch
-	curl -L "https://github.com/HewlettPackard/shs-libfabric/archive/$(LIBFABRIC_REF).tar.gz" | tar -xz --strip-components=1 -C "$@"
-	find patches -ipath '$(patsubst src/%,patches/%,$@)/*.patch' | sort | xargs -I{} sh -c 'echo "Applying: {}"; patch -d $@ -p1 < "{}"'
-
-src/lustre:
-	mkdir -p "$@"
-	curl -L "https://github.com/lustre/lustre-release/archive/refs/tags/$(LUSTRE_VER).tar.gz" | tar -xz --strip-components=1 -C "$@"
-	find patches -ipath '$(patsubst src/%,patches/%,$@)/*.patch' | sort | xargs -I{} sh -c 'echo "Applying: {}"; patch -d $@ -p1 < "{}"'
+.PHONY: check-availabilities
+check-availabilities: $(patsubst src/%,check-availability/%,$(SRC_DIRS))
+check-availability/%:
+	curl -sfIL "https://github.com/$(REPO_$(notdir $@))/archive/$(REF_$(notdir $@)).tar.gz" >/dev/null
 
 firmware_cassini-rpm: src/firmware_cassini
 	# use make call to have firmware_cassini_ver available when starting this rule
@@ -165,7 +115,7 @@ firmware_cassini-install: firmware_cassini-rpm
 	rpm -i "rpmbuild/RPMS/noarch/cassini2-firmware-devel-$(firmware_cassini_ver)-1.noarch.rpm"
 
 rpmbuild/RPMS/noarch/cassini2-firmware-devel-%.noarch.rpm:
-	cd src/firmware_cassini ; ./build-rpm.sh
+	cd src/firmware_cassini ; chmod +x build-rpm.sh ; ./build-rpm.sh
 	mkdir -p rpmbuild/RPMS/noarch
 	cp src/firmware_cassini/build/rpmbuild/RPMS/noarch/cassini2-firmware-devel-$*.noarch.rpm "$@"
 
