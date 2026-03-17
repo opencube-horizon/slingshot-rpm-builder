@@ -1,0 +1,169 @@
+From acde4075fd2fbb51636d0e745ab23238b0d439f3 Mon Sep 17 00:00:00 2001
+From: "sai-bhargav.mandavilli@hpe.com" <sai-bhargav.mandavilli@hpe.com>
+Date: Wed, 15 Oct 2025 12:00:18 -0500
+Subject: [PATCH] NETCASSINI-7980: sbl(3.22.8): fixed prototypes (#502)
+
+---
+ cassini_rpm_build/build.sh | 1 +
+ sbl.h                      | 2 +-
+ sbl_misc.c                 | 1 +
+ sbl_pml.c                  | 2 +-
+ sbl_sbm_serdes_iface.c     | 8 ++++++--
+ sbl_sbm_serdes_iface.h     | 9 ---------
+ sbl_serdes_fn.c            | 5 ++---
+ sbl_serdes_fn.h            | 2 +-
+ sbl_test.c                 | 1 +
+ 9 files changed, 14 insertions(+), 17 deletions(-)
+
+diff --git a/cassini_rpm_build/build.sh b/cassini_rpm_build/build.sh
+index f70f643..ec52f91 100755
+--- a/cassini_rpm_build/build.sh
++++ b/cassini_rpm_build/build.sh
+@@ -16,6 +16,7 @@ else
+     CE_CONFIG_BRANCH=${CE_CONFIG_BRANCH:-main}
+ fi
+ 
++
+ if [ -d ${CE_BUILD_SCRIPT_REPO} ]; then
+     git -C ${CE_BUILD_SCRIPT_REPO} fetch
+     git -C ${CE_BUILD_SCRIPT_REPO} checkout ${CE_CONFIG_BRANCH}
+diff --git a/sbl.h b/sbl.h
+index d72430a..f09cac8 100644
+--- a/sbl.h
++++ b/sbl.h
+@@ -14,7 +14,7 @@
+ 
+ #define SBL_VERSION_MAJOR		      3
+ #define SBL_VERSION_MINOR		     22
+-#define SBL_VERSION_INC			      7
++#define SBL_VERSION_INC			      8
+ 
+ #define SBL_MAGIC		     0x6273696c  /* sbli */
+ #define SBL_INIT_ATTR_MAGIC	     0x62736965  /* sbla */
+diff --git a/sbl_misc.c b/sbl_misc.c
+index 6495712..cdd8dfb 100644
+--- a/sbl_misc.c
++++ b/sbl_misc.c
+@@ -10,6 +10,7 @@
+ #include "uapi/sbl.h"
+ #include "sbl.h"
+ #include "sbl_constants.h"
++#include "sbl_internal.h"
+ 
+ 
+ /*
+diff --git a/sbl_pml.c b/sbl_pml.c
+index e1e2c42..4345b0d 100644
+--- a/sbl_pml.c
++++ b/sbl_pml.c
+@@ -339,7 +339,7 @@ void sbl_pml_err_flgs_clear_all(struct sbl_inst *sbl, int port_num)
+ 	sbl_write64(sbl, base|SBL_PML_ERR_CLR_OFFSET, err_flgs);
+ }
+ 
+-bool sbl_pml_recovery_ignore_down_origin_fault(u32 down_origin)
++static bool sbl_pml_recovery_ignore_down_origin_fault(u32 down_origin)
+ {
+ 	switch (down_origin) {
+ 	case SBL_LINK_DOWN_ORIGIN_LINK_DOWN:
+diff --git a/sbl_sbm_serdes_iface.c b/sbl_sbm_serdes_iface.c
+index cf8bff5..e109921 100644
+--- a/sbl_sbm_serdes_iface.c
++++ b/sbl_sbm_serdes_iface.c
+@@ -68,7 +68,8 @@ is_cm4_serdes_addr(u32 sbus_addr)
+ #endif
+ }
+ 
+-bool
++#ifdef CONFIG_SBL_PLATFORM_CAS_HW
++static bool
+ is_pcie_serdes_addr(u32 sbus_addr)
+ {
+ 	u8 ring     = SBUS_RING(sbus_addr);
+@@ -90,8 +91,10 @@ is_pcie_serdes_addr(u32 sbus_addr)
+ 	return false;
+ #endif
+ }
++#endif
+ 
+-bool
++#ifdef CONFIG_SBL_PLATFORM_CAS_HW
++static bool
+ is_pcie_serdes_pcs_addr(u32 sbus_addr)
+ {
+ 	u8 ring     = SBUS_RING(sbus_addr);
+@@ -113,6 +116,7 @@ is_pcie_serdes_pcs_addr(u32 sbus_addr)
+ 	return false;
+ #endif
+ }
++#endif
+ 
+ bool
+ is_sbm_crm_addr(u32 sbus_addr)
+diff --git a/sbl_sbm_serdes_iface.h b/sbl_sbm_serdes_iface.h
+index 896a577..43cbeba 100644
+--- a/sbl_sbm_serdes_iface.h
++++ b/sbl_sbm_serdes_iface.h
+@@ -23,15 +23,6 @@ typedef uint32_t u32;
+  */
+ bool is_cm4_serdes_addr(u32 sbus_addr);
+ 
+-/**
+- * @brief Returns true if the sbus_addr is a PCIe SerDes
+- *
+- * @param sbus_addr address describing a serdes ring and rxaddr
+- *
+- * @return true if match, else false
+- */
+-bool is_pcie_serdes_addr(u32 sbus_addr);
+-
+ /**
+  * @brief Returns true if the sbus_addr is a Sbus Master Controller Reciever
+  *         Memory
+diff --git a/sbl_serdes_fn.c b/sbl_serdes_fn.c
+index d90b878..bcfdd86 100644
+--- a/sbl_serdes_fn.c
++++ b/sbl_serdes_fn.c
+@@ -36,7 +36,6 @@ static u8 get_serdes_tx_mask(struct sbl_inst *sbl, int port_num);
+ static u8 get_serdes_rx_mask(struct sbl_inst *sbl, int port_num);
+ static bool get_serdes_precoding(struct sbl_inst *sbl, int port_num);
+ 
+-
+ /**
+  * @brief dummy function used when DEV_TRACE2 or DEV_TRACE3 are not defined
+  *
+@@ -1300,8 +1299,8 @@ int sbl_serdes_firm_upload(struct sbl_inst *sbl, int port_num, size_t fw_size,
+ 	return 0;
+ }
+ 
+-int sbl_get_serdes_tuning_params(struct sbl_inst *sbl, int port_num,
+-				 struct sbl_tuning_params *tps)
++static int sbl_get_serdes_tuning_params(struct sbl_inst *sbl, int port_num,
++					struct sbl_tuning_params *tps)
+ {
+ 	int i, serdes, err;
+ 
+diff --git a/sbl_serdes_fn.h b/sbl_serdes_fn.h
+index c6251c6..48ab210 100644
+--- a/sbl_serdes_fn.h
++++ b/sbl_serdes_fn.h
+@@ -163,7 +163,7 @@ int sbl_sbm_firm_upload(struct sbl_inst *sbl, int sbus_ring,
+ int sbl_check_serdes_tuning_params(struct sbl_inst *sbl, int port_num);
+ 
+ /**
+- * @brief Gets a given SerDes' tuning params
++ * @brief Save a given SerDes' tuning params
+  *
+  * Since the AAPL code does not provide this type of convenience function,
+  *  we piece it together here.
+diff --git a/sbl_test.c b/sbl_test.c
+index 1e1e40d..8661acb 100644
+--- a/sbl_test.c
++++ b/sbl_test.c
+@@ -11,6 +11,7 @@
+ #include "sbl.h"
+ #include "sbl_serdes.h"
+ #include "sbl_serdes_fn.h"
++#include "sbl_test.h"
+ #include "sbl_pml.h"
+ #include "sbl_internal.h"
+ #include "sbl_constants.h"

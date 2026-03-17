@@ -1,11 +1,12 @@
 
 .PHONY: all prepare build pkgs
 
-SHS_VER := 12.0.1
-REF_firmware_cassini := 756565798aa61f114bb1c2c9af342931711e5a5e
-REF_slingshot_base_link := 69282a99fb6301dce5399ca15190a0c39f5c7c04
-REF_libfabric := refs/heads/main
+SHS_VER := 13.0.0
 LUSTRE_VER := 2.16.61
+
+ifneq ($(NO_OVERRIDE),1)
+-include Makefile.overrides.$(SHS_VER)
+endif
 
 REPO_cassini-headers     := HewlettPackard/shs-cassini-headers
 REPO_sl-driver           := HewlettPackard/ss-link
@@ -16,6 +17,10 @@ REPO_libcxi              := HewlettPackard/shs-libcxi
 REPO_kfabric             := HewlettPackard/shs-kfabric
 REPO_network-config      := HewlettPackard/shs-network-config
 REPO_libfabric           := HewlettPackard/shs-libfabric
+REPO_utils               := HewlettPackard/shs-utils
+REPO_rxe                 := HewlettPackard/shs-rxe
+REPO_kdreg2              := HewlettPackard/shs-kdreg2
+REPO_firmware-management := HewlettPackard/shs-firmware-management
 REPO_lustre              := lustre/lustre-release
 
 REGISTRY_AND_PROJECT :=
@@ -36,7 +41,11 @@ SHS_COMPONENTS := \
   cxi-driver \
   libcxi \
   kfabric \
-  network-config
+  network-config \
+  utils \
+  rxe \
+  kdreg2 \
+  firmware-management
 
 # Set default refs only if not already set
 $(foreach c,$(SHS_COMPONENTS),\
@@ -48,19 +57,39 @@ ifeq ($(REF_lustre),)
 REF_lustre := refs/tags/$(LUSTRE_VER)
 endif
 
+HASH_SUMS := sha256 sha512
 PKGS := $(addsuffix -rpm,$(SHS_COMPONENTS)) lustre-rpm
 SRC_DIRS := $(addprefix src/,$(SHS_COMPONENTS)) src/lustre
+VERSIONS_DIR := versions
+VER_FILES := $(addsuffix .$(SHS_VER),$(addprefix $(VERSIONS_DIR)/,$(SHS_COMPONENTS)))
 
-# The components have their own versions, extract them here
-firmware_cassini_ver = $(shell awk '/^Version:/ {print $$2;}' src/firmware_cassini/cassini2-firmware-devel.spec)
-cassini_headers_ver = $(shell awk '/^Version:/ {print $$2;}' src/cassini-headers/cray-cassini-headers-public.spec)
-sl_driver_ver = $(shell awk '/^Version:/ {print $$2;}' src/sl-driver/sl-driver.spec)
-slingshot_base_link_ver = $(shell awk '/^Version:/ {print $$2;}' src/slingshot_base_link/cray-slingshot-base-link.spec)
-cxi_driver_ver = $(shell awk '/^Version:/ {print $$2;}' src/cxi-driver/cray-cxi-driver.spec)
-libcxi_ver = $(shell awk '/^Version:/ {print $$2;}' src/libcxi/cray-libcxi.spec)
-kfabric_ver = $(shell awk '/^Version:/ {print $$2;}' src/kfabric/cray-kfabric.spec)
-network_config_ver = $(shell awk '/^Version:/ {print $$2;}' src/network-config/slingshot-network-config.spec)
-libfabric_ver = $(shell grep -oP '^AC_INIT[^\d]+\K[^\]]+' src/libfabric/configure.ac 2>/dev/null)
+VER_SRC_firmware_cassini    := cassini2-firmware-devel.spec
+VER_SRC_cassini-headers     := cray-cassini-headers-public.spec
+VER_SRC_sl-driver           := sl-driver.spec
+VER_SRC_slingshot_base_link := cray-slingshot-base-link.spec
+VER_SRC_cxi-driver          := cray-cxi-driver.spec
+VER_SRC_libcxi              := cray-libcxi.spec
+VER_SRC_kfabric             := cray-kfabric.spec
+VER_SRC_network-config      := slingshot-network-config.spec
+VER_SRC_utils               := slingshot-utils.spec
+VER_SRC_rxe                 := cray-rxe-driver.spec
+VER_SRC_kdreg2              := kdreg2.spec
+VER_SRC_firmware-management := slingshot-firmware-management.spec
+VER_SRC_libfabric           := configure.ac
+
+firmware_cassini_ver    = $(shell cat $(VERSIONS_DIR)/firmware_cassini.$(SHS_VER))
+cassini_headers_ver     = $(shell cat $(VERSIONS_DIR)/cassini-headers.$(SHS_VER))
+sl_driver_ver           = $(shell cat $(VERSIONS_DIR)/sl-driver.$(SHS_VER))
+slingshot_base_link_ver = $(shell cat $(VERSIONS_DIR)/slingshot_base_link.$(SHS_VER))
+cxi_driver_ver          = $(shell cat $(VERSIONS_DIR)/cxi-driver.$(SHS_VER))
+libcxi_ver              = $(shell cat $(VERSIONS_DIR)/libcxi.$(SHS_VER))
+kfabric_ver             = $(shell cat $(VERSIONS_DIR)/kfabric.$(SHS_VER))
+network_config_ver      = $(shell cat $(VERSIONS_DIR)/network-config.$(SHS_VER))
+utils_ver               = $(shell cat $(VERSIONS_DIR)/utils.$(SHS_VER))
+rxe_ver                 = $(shell cat $(VERSIONS_DIR)/rxe.$(SHS_VER))
+kdreg2_ver              = $(shell cat $(VERSIONS_DIR)/kdreg2.$(SHS_VER))
+firmware_management_ver = $(shell cat $(VERSIONS_DIR)/firmware-management.$(SHS_VER))
+libfabric_ver           = $(shell cat $(VERSIONS_DIR)/libfabric.$(SHS_VER))
 
 pkg_ver = $(firstword $(subst -, ,$*))
 pkg_rev = $(lastword $(subst -, ,$*))
@@ -68,7 +97,7 @@ pkg_rev = $(lastword $(subst -, ,$*))
 all: pkgs runtime
 
 pkgs:
-	docker buildx build -f ./Dockerfile.builder -t $(REGISTRY_AND_PROJECT)slingshot-container-builder .
+	docker buildx build --load -f ./Dockerfile.builder -t $(REGISTRY_AND_PROJECT)slingshot-container-builder .
 	mkdir -p RPMS
 	docker run -ti --rm $(DOCKEROPTS) \
 		-v "$(PROJECT_DIR)/RPMS/:/build/rpmbuild/RPMS" \
@@ -91,6 +120,21 @@ runtime: RPMS
 
 RPMS: pkgs
 
+.PHONY: versions
+versions: $(VER_FILES)
+
+$(VERSIONS_DIR)/%.${SHS_VER}: Makefile
+	@mkdir -p versions
+	@echo "Fetching version for $* from GitHub: $(REPO_$*)@$(REF_$*)" >&2
+	@curl -fsSL "https://raw.githubusercontent.com/$(REPO_$*)/$(REF_$*)/$(VER_SRC_$*)" \
+	  | awk '/^Version:/ {print $$2;}' > "$@"
+
+$(VERSIONS_DIR)/libfabric.${SHS_VER}: Makefile
+	@mkdir -p versions
+	@echo "Fetching version for libfabric from GitHub: $(REPO_libfabric)@$(REF_libfabric)" >&2
+	@curl -fsSL "https://raw.githubusercontent.com/$(REPO_libfabric)/$(REF_libfabric)/$(VER_SRC_libfabric)" \
+	  | ggrep -oP '^AC_INIT[^\d]+\K[^\]]+' > "$@"
+
 .PHONY: prepare
 prepare: $(SRC_DIRS)
 
@@ -98,7 +142,7 @@ src/%:
 	mkdir -p "$@"
 	curl -L "https://github.com/$(REPO_$(notdir $@))/archive/$(REF_$(notdir $@)).tar.gz" \
 		| tar -xz --strip-components=1 -C "$@"
-	find patches -ipath '$(patsubst src/%,patches/%,$@)/*.patch' \
+	find patches-$(SHS_VERSION) -ipath '$(patsubst src/%,patches-$(SHS_VERSION)/%,$@)/*.patch' \
 		| sort \
 		| xargs -I{} sh -c 'echo "Applying: {}"; patch -d $@ -p1 < "{}"'
 
@@ -108,6 +152,15 @@ check-availability/%:
 	@curl -sfIL "https://github.com/$(REPO_$(notdir $@))/archive/$(REF_$(notdir $@)).tar.gz" >/dev/null \
 		&& echo "✅ https://github.com/$(REPO_$(notdir $@))/archive/$(REF_$(notdir $@)).tar.gz" \
 		|| echo "❌ https://github.com/$(REPO_$(notdir $@))/archive/$(REF_$(notdir $@)).tar.gz"
+
+.PHONY: checksums
+checksums: $(patsubst src/%,checksum/%,$(SRC_DIRS))
+checksum/%: SHELL := /bin/bash
+checksum/%:
+	@command -v pee >/dev/null || { echo "'pee' from moreutils is needed"; exit 1; }
+	@paste \
+	  <(printf '$(subst -,_,$(notdir $@))_%s\n' $(addsuffix ":",$(HASH_SUMS))) \
+	  <(curl -sL "https://github.com/$(REPO_$(notdir $@))/archive/$(REF_$(notdir $@)).tar.gz" | pee $(HASH_SUMS))
 
 firmware_cassini-rpm: src/firmware_cassini
 	# use make call to have firmware_cassini_ver available when starting this rule

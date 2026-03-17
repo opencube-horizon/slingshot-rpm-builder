@@ -1,0 +1,88 @@
+From 034e92519c12b680e45c553b972c82d8bd3271da Mon Sep 17 00:00:00 2001
+From: "sai-bhargav.mandavilli@hpe.com" <sai-bhargav.mandavilli@hpe.com>
+Date: Fri, 17 Oct 2025 14:03:43 -0500
+Subject: [PATCH] NETCASSINI-8009: sbl(3.22.9): add pcie functiondeclarations
+ (#504)
+
+---
+ sbl.h                  |  2 +-
+ sbl_sbm_serdes_iface.c |  8 ++------
+ sbl_sbm_serdes_iface.h | 18 ++++++++++++++++++
+ 3 files changed, 21 insertions(+), 7 deletions(-)
+
+diff --git a/sbl.h b/sbl.h
+index f09cac8..dc89080 100644
+--- a/sbl.h
++++ b/sbl.h
+@@ -14,7 +14,7 @@
+ 
+ #define SBL_VERSION_MAJOR		      3
+ #define SBL_VERSION_MINOR		     22
+-#define SBL_VERSION_INC			      8
++#define SBL_VERSION_INC			      9
+ 
+ #define SBL_MAGIC		     0x6273696c  /* sbli */
+ #define SBL_INIT_ATTR_MAGIC	     0x62736965  /* sbla */
+diff --git a/sbl_sbm_serdes_iface.c b/sbl_sbm_serdes_iface.c
+index e109921..cf8bff5 100644
+--- a/sbl_sbm_serdes_iface.c
++++ b/sbl_sbm_serdes_iface.c
+@@ -68,8 +68,7 @@ is_cm4_serdes_addr(u32 sbus_addr)
+ #endif
+ }
+ 
+-#ifdef CONFIG_SBL_PLATFORM_CAS_HW
+-static bool
++bool
+ is_pcie_serdes_addr(u32 sbus_addr)
+ {
+ 	u8 ring     = SBUS_RING(sbus_addr);
+@@ -91,10 +90,8 @@ is_pcie_serdes_addr(u32 sbus_addr)
+ 	return false;
+ #endif
+ }
+-#endif
+ 
+-#ifdef CONFIG_SBL_PLATFORM_CAS_HW
+-static bool
++bool
+ is_pcie_serdes_pcs_addr(u32 sbus_addr)
+ {
+ 	u8 ring     = SBUS_RING(sbus_addr);
+@@ -116,7 +113,6 @@ is_pcie_serdes_pcs_addr(u32 sbus_addr)
+ 	return false;
+ #endif
+ }
+-#endif
+ 
+ bool
+ is_sbm_crm_addr(u32 sbus_addr)
+diff --git a/sbl_sbm_serdes_iface.h b/sbl_sbm_serdes_iface.h
+index 43cbeba..5ac46ce 100644
+--- a/sbl_sbm_serdes_iface.h
++++ b/sbl_sbm_serdes_iface.h
+@@ -23,6 +23,24 @@ typedef uint32_t u32;
+  */
+ bool is_cm4_serdes_addr(u32 sbus_addr);
+ 
++/**
++ * @brief Returns true if the sbus_addr is a PCIe SerDes
++ *
++ * @param sbus_addr address describing a serdes ring and rxaddr
++ *
++ * @return true if match, else false
++ */
++bool is_pcie_serdes_addr(u32 sbus_addr);
++
++/**
++ * @brief Returns true if the sbus_addr is a PCIe SerDes PCS
++ *
++ * @param sbus_addr address describing a serdes ring and rxaddr
++ *
++ * @return true if match, else false
++ */
++bool is_pcie_serdes_pcs_addr(u32 sbus_addr);
++
+ /**
+  * @brief Returns true if the sbus_addr is a Sbus Master Controller Reciever
+  *         Memory

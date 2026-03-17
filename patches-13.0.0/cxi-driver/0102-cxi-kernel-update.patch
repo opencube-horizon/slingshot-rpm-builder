@@ -1,0 +1,40 @@
+diff --git a/drivers/net/ethernet/hpe/ss1/cass_core.h b/drivers/net/ethernet/hpe/ss1/cass_core.h
+index ee3e378..6da806b 100644
+--- a/drivers/net/ethernet/hpe/ss1/cass_core.h
++++ b/drivers/net/ethernet/hpe/ss1/cass_core.h
+@@ -223,7 +223,8 @@ static inline void pci_disable_pcie_error_reporting(void *p) {}
+ #define CTS_AVAIL (C_NUM_CTS - 1) /* CT 0 invalid */
+ #define EQS_AVAIL (C_NUM_EQS - 1) /* EQ 0 invalid */
+ 
+-#define CASS_MAX_IRQ_NAME 24
++/* must be >= than sizeof(cxi_dev->name) name (currently 30) plus some suffix like '_atu_cq' */
++#define CASS_MAX_IRQ_NAME 38
+ 
+ /* Current devices have up to 31 sensors */
+ #define CASS_MAX_SENSORS 32
+diff --git a/drivers/net/ethernet/hpe/ss1/cass_dma_buf.c b/drivers/net/ethernet/hpe/ss1/cass_dma_buf.c
+index d22bd65..0d91808 100644
+--- a/drivers/net/ethernet/hpe/ss1/cass_dma_buf.c
++++ b/drivers/net/ethernet/hpe/ss1/cass_dma_buf.c
+@@ -4,7 +4,7 @@
+ #include "cass_core.h"
+ 
+ #ifdef MODULE_IMPORT_NS
+-MODULE_IMPORT_NS(DMA_BUF);
++MODULE_IMPORT_NS("DMA_BUF");
+ #endif
+ 
+ /* This macro is needed for dma-buf.h but is defined is such a way that it is
+diff --git a/drivers/net/ethernet/hpe/ss1/cass_irq.c b/drivers/net/ethernet/hpe/ss1/cass_irq.c
+index c8ccd89..eb30d62 100644
+--- a/drivers/net/ethernet/hpe/ss1/cass_irq.c
++++ b/drivers/net/ethernet/hpe/ss1/cass_irq.c
+@@ -126,7 +126,7 @@ void cass_comp_irq_detach(struct cass_dev *hw, struct cass_irq *irq,
+ int cass_irq_init(struct cass_dev *hw)
+ {
+ 	int rc;
+-	int i;
++	unsigned int i;
+ 	int nvecs_res = 0;
+ 	int nvecs_min = 0;
+ 	int nvecs_max = 0;

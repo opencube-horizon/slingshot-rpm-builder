@@ -1,0 +1,40 @@
+diff --git a/prov/cxi/kcxi_arp_res.c b/prov/cxi/kcxi_arp_res.c
+index 5f61a35..483a07f 100644
+--- a/prov/cxi/kcxi_arp_res.c
++++ b/prov/cxi/kcxi_arp_res.c
+@@ -101,7 +101,7 @@ void kcxi_arp_res_entry_free(struct kcxi_arp_res_entry *entry)
+ 	}
+ 	spin_unlock(&res_lock);
+ 
+-	del_timer(&entry_priv->timeout_timer);
++	timer_delete(&entry_priv->timeout_timer);
+ 
+ 	neigh_release(entry_priv->neigh);
+ 
+@@ -222,7 +222,7 @@ static void kcxi_arp_res_entry_timeout(unsigned long data)
+ #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 18, 0)
+ 	struct kcxi_arp_res_entry_priv *entry_priv;
+ 
+-	entry_priv = from_timer(entry_priv, t, timeout_timer);
++	entry_priv = timer_container_of(entry_priv, t, timeout_timer);
+ 	dest_addr = entry_priv->dest_addr;
+ #else
+ 	dest_addr = (__be32)data;
+@@ -246,7 +246,7 @@ static void kcxi_arp_res_entry_timeout(unsigned long data)
+ 	spin_unlock(&res_lock);
+ 
+ 	if (found) {
+-		del_timer(&p->timeout_timer);
++		timer_delete(&p->timeout_timer);
+ 
+ 		queue_work(kcxi_wq, &p->work);
+ 	}
+@@ -442,7 +442,7 @@ static unsigned int kcxi_arp_res_entry_update(void *priv, struct sk_buff *skb,
+ 
+ 	if (wakeup) {
+ 		if (p->cb) {
+-			del_timer(&p->timeout_timer);
++			timer_delete(&p->timeout_timer);
+ 
+ 			queue_work(kcxi_wq, &p->work);
+ 		} else {

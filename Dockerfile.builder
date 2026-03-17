@@ -49,4 +49,4 @@ RUN --mount=type=cache,target=/var/cache/zypp \
 
 WORKDIR /build
 COPY Makefile /build/
-COPY patches/ /build/patches/
+COPY patches-$(SHS/ /build/patches/
