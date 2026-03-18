@@ -1,8 +1,8 @@
 
 .PHONY: all prepare build pkgs
 
-SHS_VER := 13.0.0
-LUSTRE_VER := 2.16.61
+SHS_VER := 13.1.0
+LUSTRE_VER := 2.17.0
 
 ifneq ($(NO_OVERRIDE),1)
 -include Makefile.overrides.$(SHS_VER)
