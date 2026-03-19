@@ -1,9 +1,10 @@
-FROM registry.opensuse.org/opensuse/leap:16.0
+# Stage 1: Build environment (tools and sources, no build execution)
+FROM registry.opensuse.org/opensuse/leap:16.0 AS buildenv
 
 # post-build-checks: required to get the uname hack script
 # gcc13: libcxi is broken with gcc15
 # kernel-default: required to get the vmlinuz image and the kernel modules
-# fuse-devel..system-devel: required to build libcxi
+# fuse-devel..systemd-devel: required to build libcxi
 # libcurl-devel..libjson-c-devel: required to build libfabric with cxi provider
 # pandoc: required for kfabric
 # openmpi4-devel..libmount-devel: required for Lustre
@@ -24,7 +25,7 @@ RUN --mount=type=cache,target=/var/cache/zypp \
     libuv-devel \
     libyaml-devel \
     systemd-devel \
-    curl-devel \
+    libcurl-devel \
     libjson-c-devel \
     pandoc-cli \
     openmpi4-devel \
@@ -48,5 +49,14 @@ RUN --mount=type=cache,target=/var/cache/zypp \
     ;
 
 WORKDIR /build
-COPY Makefile /build/
-COPY patches-$(SHS/ /build/patches/
+COPY . /build/
+
+# Stage 2: Execute the RPM build
+FROM buildenv AS builder
+
+ARG MAKEOPTS
+RUN make rpmbuild/RPMS/repodata/repomd.xml ${MAKEOPTS}
+
+# Stage 3: Collect RPM artifacts into a minimal image
+FROM scratch AS rpms
+COPY --from=builder /build/rpmbuild/RPMS/ /

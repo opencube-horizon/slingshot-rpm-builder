@@ -1,3 +1,13 @@
-Dockerfile
+Dockerfile*
+.git/
+.gitignore
+
+# Exclude fetched sources and built RPMs from build context
+src/
+src.old/
+RPMS/
+RPMS.*/
+
+# Editor backups
 \#*\#
 *~

@@ -1,0 +1,36 @@
+From 3d4121feda6fbc1716f3ceb2b99dcd560dcb989e Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Tiziano=20M=C3=BCller?= <tiziano.mueller@hpe.com>
+Date: Thu, 19 Mar 2026 12:32:42 +0100
+Subject: [PATCH] make_ucode_bin: make 10x faster
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+1000x could be had if we were to switch to Perl, but this is most minimal change
+
+Signed-off-by: Tiziano Müller <tiziano.mueller@hpe.com>
+---
+ scripts/make_ucode_bin.sh | 7 +++----
+ 1 file changed, 3 insertions(+), 4 deletions(-)
+
+diff --git a/scripts/make_ucode_bin.sh b/scripts/make_ucode_bin.sh
+index 3c578daf..2fe63049 100755
+--- a/scripts/make_ucode_bin.sh
++++ b/scripts/make_ucode_bin.sh
+@@ -43,10 +43,9 @@ do
+ 	##echo ">>$CLEAN_HEX<<"
+ 
+ 	## write
+-	LIST=($(echo "$CLEAN_HEX" | tr ' ' '\n'))
+-	for x in "${!LIST[@]}" ; do
+-		echo -ne "\\x${LIST[x]}" >> $OUTFILE
+-	done
++	for x in $CLEAN_HEX ; do
++		echo -ne "\\x${x}"
++	done >> $OUTFILE
+ 
+ 	## forward progress indicator
+ 	count=$((count + 1))
+-- 
+2.53.0
+

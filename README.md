@@ -4,7 +4,7 @@ Single container and makefile to build Slingshot Host Software RPM packages (cur
 
 ## Requirements
 
-- Docker (but can be easily adopter to Podman)
+- Docker with BuildKit support (Docker 18.09+)
 - GNU Make
 
 
@@ -25,6 +25,128 @@ RPMS/x86_64/cray-cxi-driver-kmp-default-1.0.0_k6.4.0_150600.23.65-0.x86_64.rpm  
 RPMS/x86_64/cray-cxi-driver-udev-1.0.0-0.x86_64.rpm                             RPMS/x86_64/sl-driver-1.20.1-0.x86_64.rpm
 RPMS/x86_64/cray-libcxi-1.0.2-0.x86_64.rpm                                      RPMS/x86_64/sl-driver-devel-1.20.1-0.x86_64.rpm
 RPMS/x86_64/cray-libcxi-devel-1.0.2-0.x86_64.rpm                                RPMS/x86_64/sl-driver-kmp-default-1.20.1_k6.4.0_150600.23.65-0.x86_64.rpm
+```
+
+For interactive debugging, `make interactive` drops into a shell inside the build environment (without running the build):
+
+```console
+❯ make interactive
+```
+
+## Build architecture
+
+The build uses a multi-stage Docker build (defined in `Dockerfile.builder`):
+
+1. **`buildenv` stage** -- installs all build dependencies (compilers, kernel headers, dev libraries)
+2. **`builder` stage** -- runs `make` to fetch sources, apply patches, and build all RPMs
+3. **`rpms` stage** -- a `FROM scratch` image containing only the built RPMs and repo metadata
+
+RPMs are extracted from the final stage to the host via `docker buildx build --output type=local,dest=./RPMS`, eliminating the need for host bind-mounts and enabling remote Docker daemon / CI builds.
+
+## Remote buildx builders
+
+To build natively on both x86_64 and aarch64 without emulation, set up a multi-node buildx builder using remote Docker hosts via SSH.
+
+### Prerequisites
+
+- SSH access (key-based, no passphrase) to machines of each target architecture
+- Docker installed and running on each remote machine
+- Your user must be in the `docker` group on each remote (or have rootless Docker configured)
+
+### 1. Create Docker contexts for each remote host
+
+```console
+❯ docker context create amd64-builder --docker "host=ssh://user@amd64-host.example.com"
+❯ docker context create arm64-builder --docker "host=ssh://user@arm64-host.example.com"
+```
+
+Verify connectivity:
+
+```console
+❯ docker --context amd64-builder info --format '{{.Architecture}}'
+x86_64
+❯ docker --context arm64-builder info --format '{{.Architecture}}'
+aarch64
+```
+
+### 2. Create a multi-node buildx builder
+
+Create the builder with the first node, then append additional nodes:
+
+```console
+❯ docker buildx create --name multiarch --driver docker-container \
+    --platform linux/amd64 amd64-builder
+❯ docker buildx create --name multiarch --append \
+    --platform linux/arm64 arm64-builder
+```
+
+Inspect and bootstrap the builder (this pulls the buildkit image on each node):
+
+```console
+❯ docker buildx inspect --builder multiarch --bootstrap
+Name:          multiarch
+Driver:        docker-container
+...
+Nodes:
+Name:          multiarch0
+Endpoint:      amd64-builder
+Platforms:     linux/amd64
+...
+Name:          multiarch1
+Endpoint:      arm64-builder
+Platforms:     linux/arm64
+...
+```
+
+### 3. Set it as the active builder
+
+```console
+❯ docker buildx use multiarch
+```
+
+Or pass `DOCKEROPTS="--builder multiarch"` to `make`.
+
+### Using the local machine as one of the nodes
+
+If your local machine is one of the target architectures (e.g., x86_64), you can use `default` as the first node context:
+
+```console
+❯ docker buildx create --name multiarch --driver docker-container \
+    --platform linux/amd64 default
+❯ docker buildx create --name multiarch --append \
+    --platform linux/arm64 arm64-builder
+```
+
+## Multi-architecture RPM repository
+
+To build RPMs for all architectures and produce a single merged repository:
+
+```console
+❯ make repo
+```
+
+This:
+
+1. Builds RPMs for each platform listed in `MULTIARCH_PLATFORMS` (default: `linux/amd64 linux/arm64`), dispatching each build to the appropriate buildx node
+2. Extracts per-platform RPMs to temporary staging directories (`RPMS.amd64/`, `RPMS.arm64/`)
+3. Merges all RPMs (arch-specific and noarch) into a single `RPMS/` directory
+4. Runs `createrepo` on the merged directory to produce unified repository metadata
+5. Cleans up the staging directories
+
+The resulting `RPMS/` directory contains a complete RPM repository usable by zypper/dnf across all built architectures:
+
+```
+RPMS/
+  x86_64/   -- x86_64 RPMs
+  aarch64/  -- aarch64 RPMs
+  noarch/   -- architecture-independent RPMs
+  repodata/ -- unified repository metadata
+```
+
+To customise which platforms are built:
+
+```console
+❯ make repo MULTIARCH_PLATFORMS="linux/amd64"
 ```
 
 ## Notes

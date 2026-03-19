@@ -1,5 +1,5 @@
 
-.PHONY: all prepare build pkgs
+.PHONY: all prepare build pkgs repo
 
 SHS_VER := 13.1.0
 LUSTRE_VER := 2.17.0
@@ -29,7 +29,7 @@ PUSH := false
 ARCH := $(shell uname -m)
 # or should we use `uname -p`, or `arch`?
 
-PROJECT_DIR := $(CURDIR)
+MULTIARCH_PLATFORMS := linux/amd64 linux/arm64
 
 # TODO: package revisions are currently hardcoded
 
@@ -41,11 +41,7 @@ SHS_COMPONENTS := \
   cxi-driver \
   libcxi \
   kfabric \
-  network-config \
-  utils \
-  rxe \
-  kdreg2 \
-  firmware-management
+  network-config
 
 # Set default refs only if not already set
 $(foreach c,$(SHS_COMPONENTS),\
@@ -97,21 +93,18 @@ pkg_rev = $(lastword $(subst -, ,$*))
 all: pkgs runtime
 
 pkgs:
-	docker buildx build --load -f ./Dockerfile.builder -t $(REGISTRY_AND_PROJECT)slingshot-container-builder .
-	mkdir -p RPMS
-	docker run -ti --rm $(DOCKEROPTS) \
-		-v "$(PROJECT_DIR)/RPMS/:/build/rpmbuild/RPMS" \
-		$(REGISTRY_AND_PROJECT)slingshot-container-builder:latest \
-		make $(PKGS) rpmbuild/RPMS/repodata/repomd.xml $(MAKEOPTS)
-# do not use $(MAKE) to avoid setting make level variables
-# also, do not use MAKEFLAGS since the outside make and the inside might not be compatible
-# NOTE: if you want to avoid refetching, bind-mount the src/ directory
+	docker buildx build \
+		--output type=local,dest=./RPMS \
+		-f ./Dockerfile.builder \
+		$(DOCKEROPTS) \
+		.
 
 interactive:
-	docker buildx build -f ./Dockerfile.builder -t $(REGISTRY_AND_PROJECT)slingshot-container-builder .
-	mkdir -p RPMS
+	docker buildx build --load --target buildenv \
+		-f ./Dockerfile.builder \
+		-t $(REGISTRY_AND_PROJECT)slingshot-container-builder \
+		.
 	docker run -ti --rm $(DOCKEROPTS) \
-		-v "$(PROJECT_DIR)/RPMS/:/build/rpmbuild/RPMS" \
 		$(REGISTRY_AND_PROJECT)slingshot-container-builder:latest \
 		/bin/bash -l
 
@@ -119,6 +112,28 @@ runtime: RPMS
 	docker buildx build -f ./Dockerfile.runtime -t $(REGISTRY_AND_PROJECT)slingshot-container-runtime . --push=$(PUSH) --provenance false
 
 RPMS: pkgs
+
+repo:
+	@for platform in $(MULTIARCH_PLATFORMS); do \
+	  tag=$${platform#linux/}; \
+	  echo "==> Building RPMs for $$platform -> RPMS.$$tag/"; \
+	  docker buildx build --platform $$platform \
+	    --output type=local,dest=./RPMS.$$tag \
+	    -f ./Dockerfile.builder $(DOCKEROPTS) . ; \
+	done
+	rm -rf RPMS
+	mkdir -p RPMS
+	@for platform in $(MULTIARCH_PLATFORMS); do \
+	  tag=$${platform#linux/}; \
+	  echo "==> Merging RPMS.$$tag/ into RPMS/"; \
+	  cp -a RPMS.$$tag/* RPMS/ ; \
+	  rm -rf RPMS.$$tag ; \
+	done
+	rm -rf RPMS/repodata
+	docker run --rm -v "$$(pwd)/RPMS:/RPMS:z" \
+	  registry.opensuse.org/opensuse/leap:16.0 \
+	  sh -c 'zypper --non-interactive install createrepo_c >/dev/null 2>&1 && createrepo /RPMS'
+	@echo "==> Multi-arch repository ready in RPMS/"
 
 .PHONY: versions
 versions: $(VER_FILES)
@@ -142,7 +157,7 @@ src/%:
 	mkdir -p "$@"
 	curl -L "https://github.com/$(REPO_$(notdir $@))/archive/$(REF_$(notdir $@)).tar.gz" \
 		| tar -xz --strip-components=1 -C "$@"
-	find patches-$(SHS_VERSION) -ipath '$(patsubst src/%,patches-$(SHS_VERSION)/%,$@)/*.patch' \
+	find patches-$(SHS_VER) -ipath '$(patsubst src/%,patches-$(SHS_VER)/%,$@)/*.patch' \
 		| sort \
 		| xargs -I{} sh -c 'echo "Applying: {}"; patch -d $@ -p1 < "{}"'
 
@@ -197,7 +212,7 @@ sl-driver-install: sl-driver-rpm
 
 rpmbuild/RPMS/$(ARCH)/sl-driver-%.$(ARCH).rpm:
 	mkdir -p rpmbuild/SOURCES "rpmbuild/RPMS/$(ARCH)"
-	sed -i -e 's|\(-Werror\)|\1 -Wno-error=missing-prototypes|' src/sl-driver/knl/Makefile
+	if [ -f src/sl-driver/knl/Makefile ]; then sed -i -e 's|\(-Werror\)|\1 -Wno-error=missing-prototypes|' src/sl-driver/knl/Makefile; fi
 	tar --transform "s,^src/sl-driver/,sl-driver-$(pkg_ver)/," -cf "rpmbuild/SOURCES/sl-driver-$(pkg_ver).tar.gz" src/sl-driver
 	env -i BUILD_METADATA="$(pkg_rev)" PATH="$(PATH)" rpmbuild --define "_topdir $(CURDIR)/rpmbuild" -ba src/sl-driver/sl-driver.spec
 
