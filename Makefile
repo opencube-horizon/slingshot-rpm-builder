@@ -1,12 +1,16 @@
 
 .PHONY: all prepare build pkgs repo
 
-SHS_VER := 13.1.0
+SHS_VER := 14.0.0
 LUSTRE_VER := 2.17.0
 
 ifneq ($(NO_OVERRIDE),1)
 -include Makefile.overrides.$(SHS_VER)
 endif
+
+# Handle rename: cassini2-firmware-devel → cassini-firmware-headers
+# Override to cassini2-firmware-devel in Makefile.overrides.* for old releases
+PKG_firmware_cassini     ?= cassini-firmware-headers
 
 REPO_cassini-headers     := HewlettPackard/shs-cassini-headers
 REPO_sl-driver           := HewlettPackard/ss-link
@@ -41,7 +45,11 @@ SHS_COMPONENTS := \
   cxi-driver \
   libcxi \
   kfabric \
-  network-config
+  network-config \
+  utils \
+  rxe \
+  kdreg2 \
+  firmware-management
 
 # Set default refs only if not already set
 $(foreach c,$(SHS_COMPONENTS),\
@@ -59,7 +67,7 @@ SRC_DIRS := $(addprefix src/,$(SHS_COMPONENTS)) src/lustre
 VERSIONS_DIR := versions
 VER_FILES := $(addsuffix .$(SHS_VER),$(addprefix $(VERSIONS_DIR)/,$(SHS_COMPONENTS)))
 
-VER_SRC_firmware_cassini    := cassini2-firmware-devel.spec
+VER_SRC_firmware_cassini    := $(PKG_firmware_cassini).spec
 VER_SRC_cassini-headers     := cray-cassini-headers-public.spec
 VER_SRC_sl-driver           := sl-driver.spec
 VER_SRC_slingshot_base_link := cray-slingshot-base-link.spec
@@ -179,15 +187,15 @@ checksum/%:
 
 firmware_cassini-rpm: src/firmware_cassini
 	# use make call to have firmware_cassini_ver available when starting this rule
-	$(MAKE) rpmbuild/RPMS/noarch/cassini2-firmware-devel-$(firmware_cassini_ver)-1.noarch.rpm
+	$(MAKE) rpmbuild/RPMS/noarch/$(PKG_firmware_cassini)-$(firmware_cassini_ver)-1.noarch.rpm
 
 firmware_cassini-install: firmware_cassini-rpm
-	rpm -i "rpmbuild/RPMS/noarch/cassini2-firmware-devel-$(firmware_cassini_ver)-1.noarch.rpm"
+	rpm -i "rpmbuild/RPMS/noarch/$(PKG_firmware_cassini)-$(firmware_cassini_ver)-1.noarch.rpm"
 
-rpmbuild/RPMS/noarch/cassini2-firmware-devel-%.noarch.rpm:
+rpmbuild/RPMS/noarch/$(PKG_firmware_cassini)-%.noarch.rpm:
 	cd src/firmware_cassini ; chmod +x build-rpm.sh ; ./build-rpm.sh
 	mkdir -p rpmbuild/RPMS/noarch
-	cp src/firmware_cassini/build/rpmbuild/RPMS/noarch/cassini2-firmware-devel-$*.noarch.rpm "$@"
+	cp src/firmware_cassini/build/rpmbuild/RPMS/noarch/$(PKG_firmware_cassini)-$*.noarch.rpm "$@"
 
 # 'env -i' is required to avoid a failure in rpmbuild when being called via nested make calls
 
@@ -200,7 +208,7 @@ cassini-headers-install: cassini-headers-rpm
 		"rpmbuild/RPMS/noarch/cray-cassini-csr-defs-$(cassini_headers_ver)-0.noarch.rpm"
 
 rpmbuild/RPMS/noarch/cray-cassini-headers-user-%.noarch.rpm:
-	mkdir -p rpmbuild/SOURCES mkdir -p rpmbuild/RPMS/noarch
+	mkdir -p rpmbuild/SOURCES rpmbuild/RPMS/noarch
 	tar --transform "s,^src/cassini-headers/,cray-cassini-headers-$(pkg_ver)/," -cf "rpmbuild/SOURCES/cray-cassini-headers-$(pkg_ver).tar.gz" src/cassini-headers
 	env -i BUILD_METADATA="$(pkg_rev)" PATH="$(PATH)" rpmbuild --define "_topdir $(CURDIR)/rpmbuild" -ba src/cassini-headers/cray-cassini-headers-public.spec
 
@@ -275,6 +283,39 @@ rpmbuild/RPMS/$(ARCH)/slingshot-network-config-%.$(ARCH).rpm:
 	mkdir -p rpmbuild/SOURCES "rpmbuild/RPMS/$(ARCH)"
 	tar --transform "s,^src/network-config/,slingshot-network-config-$(pkg_ver)/," -cf "rpmbuild/SOURCES/slingshot-network-config-$(pkg_ver).tar.gz" src/network-config
 	env -i BUILD_METADATA="$(pkg_rev)" PATH="$(PATH)" rpmbuild --define "_topdir $(CURDIR)/rpmbuild" -ba src/network-config/slingshot-network-config.spec
+
+utils-rpm: src/utils
+	$(MAKE) "rpmbuild/RPMS/noarch/slingshot-utils-$(utils_ver)-0.noarch.rpm"
+
+rpmbuild/RPMS/noarch/slingshot-utils-%.noarch.rpm:
+	mkdir -p rpmbuild/SOURCES rpmbuild/RPMS/noarch
+	tar --transform "s,^src/utils/,slingshot-utils-$(pkg_ver)/," -cf "rpmbuild/SOURCES/slingshot-utils-$(pkg_ver).tar.gz" src/utils
+	env -i BUILD_METADATA="$(pkg_rev)" PATH="$(PATH)" rpmbuild --define "_topdir $(CURDIR)/rpmbuild" -ba src/utils/slingshot-utils.spec
+
+rxe-rpm: src/rxe
+	$(MAKE) "rpmbuild/RPMS/$(ARCH)/cray-rxe-driver-devel-$(rxe_ver)-0.$(ARCH).rpm"
+
+rpmbuild/RPMS/$(ARCH)/cray-rxe-driver-devel-%.$(ARCH).rpm:
+	mkdir -p rpmbuild/SOURCES "rpmbuild/RPMS/$(ARCH)"
+	tar --transform "s,^src/rxe/,cray-rxe-driver-$(pkg_ver)/," -cf "rpmbuild/SOURCES/cray-rxe-driver-$(pkg_ver).tar.gz" src/rxe
+	cp src/rxe/kmp_files src/rxe/rxe_versions rpmbuild/SOURCES/ 2>/dev/null || true
+	env -i BUILD_METADATA="$(pkg_rev)" PATH="$(PATH)" rpmbuild --define "_topdir $(CURDIR)/rpmbuild" -ba src/rxe/cray-rxe-driver.spec
+
+kdreg2-rpm: src/kdreg2
+	$(MAKE) "rpmbuild/RPMS/$(ARCH)/kdreg2-devel-$(kdreg2_ver)-0.$(ARCH).rpm"
+
+rpmbuild/RPMS/$(ARCH)/kdreg2-devel-%.$(ARCH).rpm:
+	mkdir -p rpmbuild/SOURCES "rpmbuild/RPMS/$(ARCH)"
+	tar --transform "s,^src/kdreg2/,kdreg2-$(pkg_ver)/," -cf "rpmbuild/SOURCES/kdreg2-$(pkg_ver).tar.gz" src/kdreg2
+	env -i BUILD_METADATA="$(pkg_rev)" PATH="$(PATH)" rpmbuild --define "_topdir $(CURDIR)/rpmbuild" -ba src/kdreg2/kdreg2.spec
+
+firmware-management-rpm: src/firmware-management
+	$(MAKE) "rpmbuild/RPMS/noarch/slingshot-firmware-management-$(firmware_management_ver)-0.noarch.rpm"
+
+rpmbuild/RPMS/noarch/slingshot-firmware-management-%.noarch.rpm:
+	mkdir -p rpmbuild/SOURCES rpmbuild/RPMS/noarch
+	tar --transform "s,^src/firmware-management/,slingshot-firmware-management-$(pkg_ver)/," -cf "rpmbuild/SOURCES/slingshot-firmware-management-$(pkg_ver).tar.gz" src/firmware-management
+	env -i BUILD_METADATA="$(pkg_rev)" PATH="$(PATH)" rpmbuild --define "_topdir $(CURDIR)/rpmbuild" -ba src/firmware-management/slingshot-firmware-management.spec
 
 libfabric-rpm: src/libfabric libcxi-install cassini-headers-install
 	$(MAKE) "rpmbuild/RPMS/$(ARCH)/libfabric-$(libfabric_ver)-1.$(ARCH).rpm"

@@ -1,0 +1,50 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Tiziano=20M=C3=BCller?= <tiziano.mueller@hpe.com>
+Date: Mon, 24 Mar 2026 14:00:00 +0100
+Subject: [PATCH] kbuild: fix parallel build race in cxi tests
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+tests/cxi/single_client and tests/cxi/multi_client both list
+../common/test_common.o in their module component objects. With parallel
+builds (-jN), kbuild descends into both directories simultaneously and
+both attempt to compile common/test_common.o, racing on the .d
+dependency file:
+
+  fixdep: error opening file: .../common/.test_common.o.d:
+    No such file or directory
+
+The existing .NOTPARALLEL with target arguments does not work in the
+kbuild context: the subdirectory entries are data for kbuild's own
+scripts/Makefile.build descent mechanism, not make rules that
+target-specific .NOTPARALLEL (GNU make 4.4+) can serialize.
+
+Replace with bare .NOTPARALLEL to serialize subdirectory descent at this
+level. Since this Makefile contains only obj-y subdirectory entries (no
+local objects), the sole effect is ordering the descent -- compilation
+within each subdirectory remains fully parallel.
+
+Signed-off-by: Tiziano Mueller <tiziano.mueller@hpe.com>
+---
+ Makefile | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/Makefile b/Makefile
+index 1234567..abcdefg 100644
+--- a/Makefile
++++ b/Makefile
+@@ -54,7 +54,12 @@ rpm: $(PACKAGE)-$(VERSION).tar.gz
+ 
+ else
+ 
+-.NOTPARALLEL: tests/cxi/single_client/ tests/cxi/multi_client/
++# Serialize kbuild subdirectory descent. tests/cxi/single_client/ and
++# tests/cxi/multi_client/ both compile ../common/test_common.o, causing a
++# parallel build race on the .d dependency file. Target-specific .NOTPARALLEL
++# does not work here as obj-y entries are kbuild data, not make rules.
++# Bare .NOTPARALLEL serializes descent order only; per-subdir builds stay parallel.
++.NOTPARALLEL:
+ 
+ obj-y += kfi/
+ obj-y += prov/cxi/

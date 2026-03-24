@@ -7,6 +7,7 @@ FROM registry.opensuse.org/opensuse/leap:16.0 AS buildenv
 # fuse-devel..systemd-devel: required to build libcxi
 # libcurl-devel..libjson-c-devel: required to build libfabric with cxi provider
 # pandoc: required for kfabric
+# quilt: required for cray-rxe-driver
 # openmpi4-devel..libmount-devel: required for Lustre
 RUN --mount=type=cache,target=/var/cache/zypp \
   set -ex ; \
@@ -28,6 +29,7 @@ RUN --mount=type=cache,target=/var/cache/zypp \
     libcurl-devel \
     libjson-c-devel \
     pandoc-cli \
+    quilt \
     openmpi4-devel \
     libmount-devel \
     ; \
