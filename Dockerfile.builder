@@ -3,7 +3,8 @@ FROM registry.opensuse.org/opensuse/leap:16.0 AS buildenv
 
 # post-build-checks: required to get the uname hack script
 # gcc13: libcxi is broken with gcc15
-# kernel-default: required to get the vmlinuz image and the kernel modules
+# kernel-default, kernel-64kb: required to get the vmlinuz image and the kernel modules
+#   kernel-64kb only exists on aarch64 (64KB page size flavor)
 # fuse-devel..systemd-devel: required to build libcxi
 # libcurl-devel..libjson-c-devel: required to build libfabric with cxi provider
 # pandoc: required for kfabric
@@ -18,6 +19,7 @@ RUN --mount=type=cache,target=/var/cache/zypp \
     post-build-checks \
     gcc13 \
     kernel-default \
+    $(if [ "$(uname -m)" = aarch64 ]; then echo kernel-64kb kernel-64kb-devel; fi) \
     fuse-devel \
     libconfig-devel \
     libnl3-devel \
