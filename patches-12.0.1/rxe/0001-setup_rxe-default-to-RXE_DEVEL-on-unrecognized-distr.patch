@@ -1,0 +1,59 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Tiziano=20M=C3=BCller?= <tiziano.mueller@hpe.com>
+Date: Mon, 24 Mar 2026 14:30:00 +0100
+Subject: [PATCH] setup_rxe: default to RXE_DEVEL on unrecognized distros
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+setup_rxe.sh only recognizes SLES 15 SP4/SP5, Rocky 9.2, and RHEL 9.4.
+On any other distro (e.g. openSUSE Leap 16.0), the script silently
+replaces the source tree with an empty Makefile and exits 0. The kernel
+module build then produces no .ko files, and rpmbuild fails when
+packaging KMPs for installed flavors.
+
+Default unrecognized distros to a new RXE_DEVEL target that applies
+upstream and functionality patches plus kernel 6.12 compatibility
+patches via the devel.series quilt series.
+
+Signed-off-by: Tiziano Mueller <tiziano.mueller@hpe.com>
+---
+ setup_rxe.sh | 17 ++++++++---------
+ 1 file changed, 8 insertions(+), 9 deletions(-)
+
+diff --git a/setup_rxe.sh b/setup_rxe.sh
+--- a/setup_rxe.sh
++++ b/setup_rxe.sh
+@@ -22,11 +22,8 @@
+ 	elif [[ "$rel" = "Red Hat Enterprise Linux 9.4 (Plow)" ]]; then
+ 		RXE_TARGET=RHEL_9_4
+ 	else
+-	    echo "Unrecognized target $rel, set RXE_TARGET"
+-	    rm -rf rxe
+-	    mkdir -p rxe;
+-	    touch rxe/Makefile
+-	    exit 0
++	    echo "Unrecognized target $rel, defaulting to RXE_DEVEL"
++	    RXE_TARGET=RXE_DEVEL
+ 	fi
+ fi
+ 
+@@ -44,12 +41,13 @@
+ elif [[ "${RXE_TARGET}" = "RHEL_9_4" ]]; then
+     export QUILT_SERIES=RHEL_9_4.series
+     compatibility_files=""
++elif [[ "${RXE_TARGET}" = "RXE_DEVEL" ]]; then
++    export QUILT_SERIES=RXE_DEVEL.series
++    compatibility_files="devel.series"
+ else
+-    echo "No patch series found for target ${RXE_TARGET}"
+-    rm -rf rxe
+-    mkdir -p rxe;
+-    touch rxe/Makefile
+-    exit 0
++    echo "No patch series found for target ${RXE_TARGET}, defaulting to RXE_DEVEL"
++    export QUILT_SERIES=RXE_DEVEL.series
++    compatibility_files="devel.series"
+ fi
+ 
+ echo "Build for ${RXE_TARGET}"

@@ -49,7 +49,8 @@ SHS_COMPONENTS := \
   utils \
   rxe \
   kdreg2 \
-  firmware-management
+  firmware-management \
+  libfabric
 
 # Set default refs only if not already set
 $(foreach c,$(SHS_COMPONENTS),\
@@ -102,13 +103,15 @@ all: pkgs runtime
 
 pkgs:
 	docker buildx build \
-		--output type=local,dest=./RPMS \
+		--output type=local,dest=./RPMS.$(SHS_VER) \
+		--build-arg SHS_VER=$(SHS_VER) \
 		-f ./Dockerfile.builder \
 		$(DOCKEROPTS) \
 		.
 
 interactive:
 	docker buildx build --load --target buildenv \
+		--build-arg SHS_VER=$(SHS_VER) \
 		-f ./Dockerfile.builder \
 		-t $(REGISTRY_AND_PROJECT)slingshot-container-builder \
 		.
@@ -116,32 +119,33 @@ interactive:
 		$(REGISTRY_AND_PROJECT)slingshot-container-builder:latest \
 		/bin/bash -l
 
-runtime: RPMS
+runtime: RPMS.$(SHS_VER)
 	docker buildx build -f ./Dockerfile.runtime -t $(REGISTRY_AND_PROJECT)slingshot-container-runtime . --push=$(PUSH) --provenance false
 
-RPMS: pkgs
+RPMS.$(SHS_VER): pkgs
 
 repo:
 	@for platform in $(MULTIARCH_PLATFORMS); do \
 	  tag=$${platform#linux/}; \
-	  echo "==> Building RPMs for $$platform -> RPMS.$$tag/"; \
+	  echo "==> Building RPMs for $$platform -> RPMS.$(SHS_VER).$$tag/"; \
 	  docker buildx build --platform $$platform \
-	    --output type=local,dest=./RPMS.$$tag \
+	    --output type=local,dest=./RPMS.$(SHS_VER).$$tag \
+	    --build-arg SHS_VER=$(SHS_VER) \
 	    -f ./Dockerfile.builder $(DOCKEROPTS) . ; \
 	done
-	rm -rf RPMS
-	mkdir -p RPMS
+	rm -rf RPMS.$(SHS_VER)
+	mkdir -p RPMS.$(SHS_VER)
 	@for platform in $(MULTIARCH_PLATFORMS); do \
 	  tag=$${platform#linux/}; \
-	  echo "==> Merging RPMS.$$tag/ into RPMS/"; \
-	  cp -a RPMS.$$tag/* RPMS/ ; \
-	  rm -rf RPMS.$$tag ; \
+	  echo "==> Merging RPMS.$(SHS_VER).$$tag/ into RPMS.$(SHS_VER)/"; \
+	  cp -a RPMS.$(SHS_VER).$$tag/* RPMS.$(SHS_VER)/ ; \
+	  rm -rf RPMS.$(SHS_VER).$$tag ; \
 	done
-	rm -rf RPMS/repodata
-	docker run --rm -v "$$(pwd)/RPMS:/RPMS:z" \
+	rm -rf RPMS.$(SHS_VER)/repodata
+	docker run --rm -v "$$(pwd)/RPMS.$(SHS_VER):/RPMS:z" \
 	  registry.opensuse.org/opensuse/leap:16.0 \
 	  sh -c 'zypper --non-interactive install createrepo_c >/dev/null 2>&1 && createrepo /RPMS'
-	@echo "==> Multi-arch repository ready in RPMS/"
+	@echo "==> Multi-arch repository ready in RPMS.$(SHS_VER)/"
 
 .PHONY: versions
 versions: $(VER_FILES)
@@ -322,6 +326,8 @@ libfabric-rpm: src/libfabric libcxi-install cassini-headers-install
 
 rpmbuild/RPMS/$(ARCH)/libfabric-%.$(ARCH).rpm:
 	mkdir -p rpmbuild/SOURCES "rpmbuild/RPMS/$(ARCH)"
+	# Align autotools version with our desired version so make dist produces the right tarball name
+	sed -i 's/AC_INIT(\[libfabric\], \[[^]]*\]/AC_INIT([libfabric], [$(pkg_ver)]/' src/libfabric/configure.ac
 	cd src/libfabric && ./autogen.sh && ./configure && make dist
 	cp "src/libfabric/libfabric-$(pkg_ver).tar.bz2" rpmbuild/SOURCES/
 	env -i PATH="$(PATH)" rpmbuild --define "_topdir $(CURDIR)/rpmbuild" -ba src/libfabric/libfabric.spec

@@ -59,7 +59,8 @@ COPY . /build/
 FROM buildenv AS builder
 
 ARG MAKEOPTS
-RUN make rpmbuild/RPMS/repodata/repomd.xml ${MAKEOPTS}
+ARG SHS_VER
+RUN make rpmbuild/RPMS/repodata/repomd.xml SHS_VER=${SHS_VER} ${MAKEOPTS}
 
 # Stage 3: Collect RPM artifacts into a minimal image
 FROM scratch AS rpms
