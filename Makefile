@@ -29,6 +29,7 @@ REPO_lustre              := lustre/lustre-release
 
 REGISTRY_AND_PROJECT :=
 PUSH := false
+LOAD := true
 
 ARCH := $(shell uname -m)
 # or should we use `uname -p`, or `arch`?
@@ -103,24 +104,29 @@ all: pkgs runtime
 
 pkgs:
 	docker buildx build \
+		--target rpms \
 		--output type=local,dest=./RPMS.$(SHS_VER) \
 		--build-arg SHS_VER=$(SHS_VER) \
-		-f ./Dockerfile.builder \
 		$(DOCKEROPTS) \
 		.
 
 interactive:
 	docker buildx build --load --target buildenv \
 		--build-arg SHS_VER=$(SHS_VER) \
-		-f ./Dockerfile.builder \
 		-t $(REGISTRY_AND_PROJECT)slingshot-container-builder \
 		.
 	docker run -ti --rm $(DOCKEROPTS) \
 		$(REGISTRY_AND_PROJECT)slingshot-container-builder:latest \
 		/bin/bash -l
 
-runtime: RPMS.$(SHS_VER)
-	docker buildx build -f ./Dockerfile.runtime -t $(REGISTRY_AND_PROJECT)slingshot-container-runtime . --push=$(PUSH) --provenance false
+runtime:
+	docker buildx build \
+		--target runtime \
+		--build-arg SHS_VER=$(SHS_VER) \
+		-t $(REGISTRY_AND_PROJECT)slingshot-container-runtime \
+		--push=$(PUSH) --load=$(LOAD) --provenance false \
+		$(DOCKEROPTS) \
+		.
 
 RPMS.$(SHS_VER): pkgs
 
@@ -129,9 +135,10 @@ repo:
 	  tag=$${platform#linux/}; \
 	  echo "==> Building RPMs for $$platform -> RPMS.$(SHS_VER).$$tag/"; \
 	  docker buildx build --platform $$platform \
+	    --target rpms \
 	    --output type=local,dest=./RPMS.$(SHS_VER).$$tag \
 	    --build-arg SHS_VER=$(SHS_VER) \
-	    -f ./Dockerfile.builder $(DOCKEROPTS) . ; \
+	    $(DOCKEROPTS) . ; \
 	done
 	rm -rf RPMS.$(SHS_VER)
 	mkdir -p RPMS.$(SHS_VER)

@@ -35,7 +35,7 @@ For interactive debugging, `make interactive` drops into a shell inside the buil
 
 ## Build architecture
 
-The build uses a multi-stage Docker build (defined in `Dockerfile.builder`):
+The build uses a multi-stage Docker build (defined in `Dockerfile`):
 
 1. **`buildenv` stage** -- installs all build dependencies (compilers, kernel headers, dev libraries)
 2. **`builder` stage** -- runs `make` to fetch sources, apply patches, and build all RPMs

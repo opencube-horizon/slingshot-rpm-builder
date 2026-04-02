@@ -65,3 +65,22 @@ RUN make rpmbuild/RPMS/repodata/repomd.xml SHS_VER=${SHS_VER} ${MAKEOPTS}
 # Stage 3: Collect RPM artifacts into a minimal image
 FROM scratch AS rpms
 COPY --from=builder /build/rpmbuild/RPMS/ /
+
+# Stage 4: Runtime container with userspace Slingshot libraries
+FROM registry.opensuse.org/opensuse/leap:16.0 AS runtime
+
+RUN --mount=type=cache,target=/var/cache/zypp --mount=type=bind,from=rpms,target=/tmp/RPMS \
+  set -ex ; \
+  zypper --non-interactive install --recommends \
+    -t pattern base ; \
+  zypper --non-interactive install \
+    hwloc \
+    kmod \
+    lldpd \
+    jq \
+    iputils \
+    ; \
+  zypper --non-interactive --no-gpg-checks install \
+    /tmp/RPMS/$(uname -m)/cray-libcxi-[0-9]*.rpm \
+    /tmp/RPMS/$(uname -m)/cray-libcxi-utils-[0-9]*.rpm \
+    /tmp/RPMS/$(uname -m)/libfabric-[0-9]*.rpm
