@@ -12,19 +12,6 @@ index ee3e378..6da806b 100644
  
  /* Current devices have up to 31 sensors */
  #define CASS_MAX_SENSORS 32
-diff --git a/drivers/net/ethernet/hpe/ss1/cass_dma_buf.c b/drivers/net/ethernet/hpe/ss1/cass_dma_buf.c
-index d22bd65..0d91808 100644
---- a/drivers/net/ethernet/hpe/ss1/cass_dma_buf.c
-+++ b/drivers/net/ethernet/hpe/ss1/cass_dma_buf.c
-@@ -4,7 +4,7 @@
- #include "cass_core.h"
- 
- #ifdef MODULE_IMPORT_NS
--MODULE_IMPORT_NS(DMA_BUF);
-+MODULE_IMPORT_NS("DMA_BUF");
- #endif
- 
- /* This macro is needed for dma-buf.h but is defined is such a way that it is
 diff --git a/drivers/net/ethernet/hpe/ss1/cass_irq.c b/drivers/net/ethernet/hpe/ss1/cass_irq.c
 index c8ccd89..eb30d62 100644
 --- a/drivers/net/ethernet/hpe/ss1/cass_irq.c

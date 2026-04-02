@@ -6,7 +6,7 @@ MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit
 
-setup_rxe.sh only recognizes SLES 15 SP5-SP7 and RHEL 9.4/9.6. On any
+setup_rxe.sh only recognizes SLES 15 SP5-SP6 and RHEL 9.4. On any
 other distro (e.g. openSUSE Leap 16.0), the hardcoded RXE_ERR_RET=0
 causes cleanup_and_fail to silently replace the source tree with an
 empty Makefile and exit 0. The kernel module build then produces no .ko
@@ -14,15 +14,15 @@ files, and rpmbuild fails when packaging KMPs for installed flavors:
 
   error: File not found: .../BUILDROOT/lib/modules/...-64kb
 
-Remove the RXE_ERR_RET=0 override so unrecognized distros fall through
-to the RXE_DEVEL target, which applies upstream and functionality
-patches without compatibility backports -- appropriate for kernels close
-to the rxe-6.13 tarball baseline.
+Remove the RXE_ERR_RET=0 override and default unrecognized distros to
+the RXE_DEVEL target, which applies upstream and functionality patches
+without compatibility backports -- appropriate for kernels close to the
+rxe-6.13 tarball baseline.
 
 Signed-off-by: Tiziano Mueller <tiziano.mueller@hpe.com>
 ---
- setup_rxe.sh | 5 -----
- 1 file changed, 5 deletions(-)
+ setup_rxe.sh | 9 ++-------
+ 1 file changed, 2 insertions(+), 7 deletions(-)
 
 diff --git a/setup_rxe.sh b/setup_rxe.sh
 index 1234567..abcdefg 100755
@@ -40,3 +40,13 @@ index 1234567..abcdefg 100755
  cleanup_and_fail() {
  	echo "FAIL: $1"
  	rm -rf rxe/ .pc/
+@@ -46,7 +41,8 @@ if [[ "${RXE_TARGET}" == "UNKNOWN" ]]; then
+ 	elif [[ "$rel" = "Red Hat Enterprise Linux 9.4 (Plow)" ]]; then
+ 		distro="rhel"
+ 		RXE_TARGET=RHEL_9_4
+ 	else
+-	    cleanup_and_fail "Unrecognized target $rel, set RXE_TARGET"
++	    echo "Unrecognized target $rel, defaulting to RXE_DEVEL"
++	    RXE_TARGET=RXE_DEVEL
+ 	fi
+ fi

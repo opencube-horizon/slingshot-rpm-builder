@@ -1,0 +1,34 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Tiziano=20M=C3=BCller?= <tiziano.mueller@hpe.com>
+Date: Wed, 2 Apr 2026 14:00:00 +0200
+Subject: [PATCH] uapi: cxi: add CXI_SVC_MEMBER_NET_NS for network namespace
+ support
+
+Add network namespace member type to the CXI service member enum and
+the netns field to the cxi_svc_member union.  This is required for the
+libfabric CXI provider's container/namespace-aware service matching.
+---
+ include/uapi/misc/cxi.h | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/include/uapi/misc/cxi.h b/include/uapi/misc/cxi.h
+--- a/include/uapi/misc/cxi.h
++++ b/include/uapi/misc/cxi.h
+@@ -861,6 +861,7 @@ enum cxi_svc_member_type {
+ 	CXI_SVC_MEMBER_IGNORE,
+ 	CXI_SVC_MEMBER_UID,
+ 	CXI_SVC_MEMBER_GID,
++	CXI_SVC_MEMBER_NET_NS,
+ 
+ 	CXI_SVC_MEMBER_MAX,
+ };
+@@ -922,6 +923,7 @@ struct cxi_svc_desc {
+ 		union cxi_svc_member {
+ 			__kernel_uid_t  uid;
+ 			__kernel_gid_t  gid;
++			unsigned int    netns;
+ 		} svc_member;
+ 		enum cxi_svc_member_type type;
+ 	} members[CXI_SVC_MAX_MEMBERS];
+-- 
+2.53.0

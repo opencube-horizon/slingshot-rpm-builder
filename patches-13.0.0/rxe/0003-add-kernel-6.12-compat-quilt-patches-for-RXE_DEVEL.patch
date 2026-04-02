@@ -1,0 +1,86 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Tiziano=20M=C3=BCller?= <tiziano.mueller@hpe.com>
+Date: Wed, 2 Apr 2026 12:00:00 +0200
+Subject: [PATCH] Add kernel 6.12 compatibility quilt patches for RXE_DEVEL
+ target
+
+Add a compatibility patch for building rxe-6.13 on kernel 6.12+:
+
+- add_netmem_to_skb_frag_t: Replace direct bio_vec member access with
+  skb_frag accessor functions (skb_frag_fill_page_desc, skb_frag_page,
+  skb_frag_off, skb_frag_size) in rxe_mr.c and rxe_icrc.c.  The
+  functionality patches 0009 and 0012 introduce code that uses the old
+  bv_page/bv_offset/bv_len struct members which no longer exist in
+  kernel 6.12 where skb_frag_t changed from struct bio_vec to struct
+  skb_frag.
+
+Also add devel.series to wire the compatibility patch into the quilt
+series, and update setup_rxe.sh to set compatibility_files="devel.series"
+for the RXE_DEVEL target.
+---
+ patches/compatibility/devel.series                  |  1 +
+ patches/compatibility/devel/add_netmem_to_skb_frag_t.patch | 32 ++++++++++++
+ setup_rxe.sh                                        |  2 +-
+ 3 files changed, 34 insertions(+), 1 deletion(-)
+ create mode 100644 patches/compatibility/devel.series
+ create mode 100644 patches/compatibility/devel/add_netmem_to_skb_frag_t.patch
+
+diff --git a/patches/compatibility/devel.series b/patches/compatibility/devel.series
+new file mode 100644
+index 0000000..a1b2c3d
+--- /dev/null
++++ b/patches/compatibility/devel.series
+@@ -0,0 +1 @@
++compatibility/devel/add_netmem_to_skb_frag_t.patch -p1
+diff --git a/patches/compatibility/devel/add_netmem_to_skb_frag_t.patch b/patches/compatibility/devel/add_netmem_to_skb_frag_t.patch
+new file mode 100644
+index 0000000..b3c4d5e
+--- /dev/null
++++ b/patches/compatibility/devel/add_netmem_to_skb_frag_t.patch
+@@ -0,0 +1,32 @@
++This patch adapts the rxe driver for the netmem-based skb_frag_t
++introduced in kernel 6.12+. The old bio_vec members (bv_page,
++bv_offset, bv_len) are replaced with their accessor counterparts.
++
++diff --git a/rxe/rxe_mr.c b/rxe/rxe_mr.c
++--- a/rxe/rxe_mr.c
+++++ b/rxe/rxe_mr.c
++@@ -256,9 +256,7 @@
++ 		return -EINVAL;
++ 	}
++ 
++-	frag->bv_len = length;
++-	frag->bv_offset = offset;
++-	frag->bv_page = page;
+++	skb_frag_fill_page_desc(frag, page, offset, length);
++ 	/* because kfree_skb will call put_page() */
++ 	get_page(page);
++ 	skb_shinfo(skb)->nr_frags++;
++diff --git a/rxe/rxe_icrc.c b/rxe/rxe_icrc.c
++--- a/rxe/rxe_icrc.c
+++++ b/rxe/rxe_icrc.c
++@@ -160,8 +160,8 @@
++ 	/* handle any payload in frags */
++ 	for (i = 0; i < shinfo->nr_frags; i++) {
++ 		frag = &shinfo->frags[i];
++-		addr = page_to_virt(frag->bv_page) + frag->bv_offset;
++-		len = frag->bv_len;
+++		addr = page_to_virt(skb_frag_page(frag)) + skb_frag_off(frag);
+++		len = skb_frag_size(frag);
++ 		if (i == shinfo->nr_frags - 1) {
++ 			len -= RXE_ICRC_SIZE;
++ 			*icrcp = (__be32 *)(addr + len);
+diff --git a/setup_rxe.sh b/setup_rxe.sh
+--- a/setup_rxe.sh
++++ b/setup_rxe.sh
+@@ -60,7 +60,7 @@
+     compatibility_files="${compatibility_files}"
+ elif [[ "${RXE_TARGET}" = "RXE_DEVEL" ]]; then
+     export QUILT_SERIES=RXE_DEVEL.series
+-    compatibility_files=""
++    compatibility_files="devel.series"
+ else
+     cleanup_and_fail "No patch series found for target ${RXE_TARGET}"
+ fi
+-- 
+2.53.0

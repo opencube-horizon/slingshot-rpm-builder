@@ -11,15 +11,6 @@ index 5f61a35..483a07f 100644
  
  	neigh_release(entry_priv->neigh);
  
-@@ -222,7 +222,7 @@ static void kcxi_arp_res_entry_timeout(unsigned long data)
- #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 18, 0)
- 	struct kcxi_arp_res_entry_priv *entry_priv;
- 
--	entry_priv = from_timer(entry_priv, t, timeout_timer);
-+	entry_priv = timer_container_of(entry_priv, t, timeout_timer);
- 	dest_addr = entry_priv->dest_addr;
- #else
- 	dest_addr = (__be32)data;
 @@ -246,7 +246,7 @@ static void kcxi_arp_res_entry_timeout(unsigned long data)
  	spin_unlock(&res_lock);
  
