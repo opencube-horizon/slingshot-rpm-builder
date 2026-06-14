@@ -1,6 +1,7 @@
 # Stage 1: Build environment (tools and sources, no build execution)
 FROM registry.opensuse.org/opensuse/leap:16.0 AS buildenv
 
+# BuildKit sets TARGETPLATFORM (for example linux/amd64 or linux/arm64); use it to isolate zypper caches per architecture.
 ARG TARGETPLATFORM
 
 # post-build-checks: required to get the uname hack script
