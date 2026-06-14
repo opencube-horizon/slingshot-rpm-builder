@@ -1,6 +1,9 @@
 # Stage 1: Build environment (tools and sources, no build execution)
 FROM registry.opensuse.org/opensuse/leap:16.0 AS buildenv
 
+# BuildKit sets TARGETPLATFORM (for example linux/amd64 or linux/arm64); use it to isolate zypper caches per architecture.
+ARG TARGETPLATFORM
+
 # post-build-checks: required to get the uname hack script
 # gcc13: libcxi is broken with gcc15
 # kernel-default, kernel-64kb: required to get the vmlinuz image and the kernel modules
@@ -10,7 +13,7 @@ FROM registry.opensuse.org/opensuse/leap:16.0 AS buildenv
 # pandoc: required for kfabric
 # quilt: required for cray-rxe-driver
 # openmpi4-devel..libmount-devel: required for Lustre
-RUN --mount=type=cache,target=/var/cache/zypp \
+RUN --mount=type=cache,id=zypp-buildenv-${TARGETPLATFORM},sharing=locked,target=/var/cache/zypp \
   set -ex ; \
   zypper --non-interactive up ; \
   zypper --non-interactive install --recommends \
@@ -46,7 +49,7 @@ RUN rm /etc/rpm/macros.leap
 RUN for e in cc cpp gcc{,-ar,-nm,-ranlib} ; do ln -sf $e-13 /usr/bin/$e ; done
 
 # createrepo_c: required for repo file creation
-RUN --mount=type=cache,target=/var/cache/zypp \
+RUN --mount=type=cache,id=zypp-buildenv-${TARGETPLATFORM},sharing=locked,target=/var/cache/zypp \
   set -ex ; \
   zypper --non-interactive install \
     createrepo_c \
@@ -69,7 +72,9 @@ COPY --from=builder /build/rpmbuild/RPMS/ /
 # Stage 4: Runtime container with userspace Slingshot libraries
 FROM registry.opensuse.org/opensuse/leap:16.0 AS runtime
 
-RUN --mount=type=cache,target=/var/cache/zypp --mount=type=bind,from=rpms,target=/tmp/RPMS \
+ARG TARGETPLATFORM
+
+RUN --mount=type=cache,id=zypp-runtime-${TARGETPLATFORM},sharing=locked,target=/var/cache/zypp --mount=type=bind,from=rpms,target=/tmp/RPMS \
   set -ex ; \
   zypper --non-interactive install --recommends \
     -t pattern base ; \
