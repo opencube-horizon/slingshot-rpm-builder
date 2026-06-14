@@ -7,17 +7,17 @@ on:
     inputs:
       shs_ver:
         description: 'SHS version to build'
-        default: '12.0.1'
+        default: '14.0.0'
         type: choice
         options:
-          - '12.0.1'
-          - '13.0.0'
-          - '13.1.0'
           - '14.0.0'
+          - '13.1.0'
+          - '13.0.0'
+          - '12.0.1'
 
 env:
   REGISTRY: ghcr.io
-  SHS_VER: ${{ inputs.shs_ver || '12.0.1' }}
+  SHS_VER: ${{ inputs.shs_ver || '14.0.0' }}
 
 permissions:
   contents: read
@@ -61,6 +61,28 @@ jobs:
           target: runtime
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: ${{ env.REGISTRY }}/${{ github.repository_owner }}/slingshot-container-runtime:${{ env.SHS_VER }}
+          tags: ${{ env.REGISTRY }}/${{ github.repository_owner }}/slingshot-runtime:${{ env.SHS_VER }}
+          build-args: SHS_VER=${{ env.SHS_VER }}
+          cache-from: type=gha,scope=shs-${{ env.SHS_VER }}
+
+      - name: Build and push runtime-dev image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: runtime-dev
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ env.REGISTRY }}/${{ github.repository_owner }}/slingshot-runtime-devel:${{ env.SHS_VER }}
+          build-args: SHS_VER=${{ env.SHS_VER }}
+          cache-from: type=gha,scope=shs-${{ env.SHS_VER }}
+
+      - name: Build and push ops image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: ops
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ env.REGISTRY }}/${{ github.repository_owner }}/slingshot-ops:${{ env.SHS_VER }}
           build-args: SHS_VER=${{ env.SHS_VER }}
           cache-from: type=gha,scope=shs-${{ env.SHS_VER }}

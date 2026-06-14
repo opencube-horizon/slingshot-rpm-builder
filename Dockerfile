@@ -69,23 +69,52 @@ RUN make rpmbuild/RPMS/repodata/repomd.xml SHS_VER=${SHS_VER} ${MAKEOPTS}
 FROM scratch AS rpms
 COPY --from=builder /build/rpmbuild/RPMS/ /
 
-# Stage 4: Runtime container with userspace Slingshot libraries
+# Stage 4: Runtime — minimal userspace libraries for running CXI/libfabric applications
 FROM registry.opensuse.org/opensuse/leap:16.0 AS runtime
 
 ARG TARGETPLATFORM
 
-RUN --mount=type=cache,id=zypp-runtime-${TARGETPLATFORM},sharing=locked,target=/var/cache/zypp --mount=type=bind,from=rpms,target=/tmp/RPMS \
+RUN --mount=type=cache,id=zypp-runtime-${TARGETPLATFORM},sharing=locked,target=/var/cache/zypp \
+    --mount=type=bind,from=rpms,target=/tmp/RPMS \
   set -ex ; \
-  zypper --non-interactive install --recommends \
-    -t pattern base ; \
+  zypper addrepo --no-gpgcheck /tmp/RPMS slingshot ; \
   zypper --non-interactive install \
+    cray-libcxi \
+    libfabric \
     hwloc \
-    kmod \
-    lldpd \
-    jq \
+    ; \
+  zypper removerepo slingshot
+
+# Stage 5: Development — runtime + devel headers/libraries for building applications
+FROM runtime AS runtime-dev
+
+ARG TARGETPLATFORM
+
+RUN --mount=type=cache,id=zypp-runtime-${TARGETPLATFORM},sharing=locked,target=/var/cache/zypp \
+    --mount=type=bind,from=rpms,target=/tmp/RPMS \
+  set -ex ; \
+  zypper addrepo --no-gpgcheck /tmp/RPMS slingshot ; \
+  zypper --non-interactive install \
+    cray-libcxi-devel \
+    libfabric-devel \
+    ; \
+  zypper removerepo slingshot
+
+# Stage 6: Operations — runtime + retry handler, network config, operational tools
+FROM runtime AS ops
+
+ARG TARGETPLATFORM
+
+RUN --mount=type=cache,id=zypp-runtime-${TARGETPLATFORM},sharing=locked,target=/var/cache/zypp \
+    --mount=type=bind,from=rpms,target=/tmp/RPMS \
+  set -ex ; \
+  zypper addrepo --no-gpgcheck /tmp/RPMS slingshot ; \
+  zypper --non-interactive install \
+    cray-libcxi-utils \
+    cray-libcxi-retry-handler \
+    slingshot-network-config \
+    open-lldp \
+    iproute2 \
     iputils \
     ; \
-  zypper --non-interactive --no-gpg-checks install \
-    /tmp/RPMS/$(uname -m)/cray-libcxi-[0-9]*.rpm \
-    /tmp/RPMS/$(uname -m)/cray-libcxi-utils-[0-9]*.rpm \
-    /tmp/RPMS/$(uname -m)/libfabric-[0-9]*.rpm
+  zypper removerepo slingshot

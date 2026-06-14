@@ -29,12 +29,12 @@ REPO_lustre              := lustre/lustre-release
 
 REGISTRY_AND_PROJECT :=
 PUSH := false
-LOAD := true
+LOAD := false
 
 ARCH := $(shell uname -m)
 # or should we use `uname -p`, or `arch`?
 
-MULTIARCH_PLATFORMS := linux/amd64 linux/arm64
+PLATFORMS := linux/amd64,linux/arm64
 
 # TODO: package revisions are currently hardcoded
 
@@ -100,7 +100,9 @@ libfabric_ver           = $(shell cat $(VERSIONS_DIR)/libfabric.$(SHS_VER))
 pkg_ver = $(firstword $(subst -, ,$*))
 pkg_rev = $(lastword $(subst -, ,$*))
 
-all: pkgs runtime
+all: pkgs containers
+
+containers: runtime-container runtime-devel-container ops-container
 
 pkgs:
 	docker buildx build \
@@ -119,11 +121,32 @@ interactive:
 		$(REGISTRY_AND_PROJECT)slingshot-container-builder:latest \
 		/bin/bash -l
 
-runtime:
+runtime-container:
 	docker buildx build \
+		--platform $(PLATFORMS) \
 		--target runtime \
 		--build-arg SHS_VER=$(SHS_VER) \
-		-t $(REGISTRY_AND_PROJECT)slingshot-container-runtime \
+		-t $(REGISTRY_AND_PROJECT)slingshot-runtime \
+		--push=$(PUSH) --load=$(LOAD) --provenance false \
+		$(DOCKEROPTS) \
+		.
+
+runtime-devel-container:
+	docker buildx build \
+		--platform $(PLATFORMS) \
+		--target runtime-dev \
+		--build-arg SHS_VER=$(SHS_VER) \
+		-t $(REGISTRY_AND_PROJECT)slingshot-runtime-devel \
+		--push=$(PUSH) --load=$(LOAD) --provenance false \
+		$(DOCKEROPTS) \
+		.
+
+ops-container:
+	docker buildx build \
+		--platform $(PLATFORMS) \
+		--target ops \
+		--build-arg SHS_VER=$(SHS_VER) \
+		-t $(REGISTRY_AND_PROJECT)slingshot-ops \
 		--push=$(PUSH) --load=$(LOAD) --provenance false \
 		$(DOCKEROPTS) \
 		.
@@ -131,27 +154,23 @@ runtime:
 RPMS.$(SHS_VER): pkgs
 
 repo:
-	@for platform in $(MULTIARCH_PLATFORMS); do \
-	  tag=$${platform#linux/}; \
-	  echo "==> Building RPMs for $$platform -> RPMS.$(SHS_VER).$$tag/"; \
-	  docker buildx build --platform $$platform \
-	    --target rpms \
-	    --output type=local,dest=./RPMS.$(SHS_VER).$$tag \
-	    --build-arg SHS_VER=$(SHS_VER) \
-	    $(DOCKEROPTS) . ; \
-	done
-	rm -rf RPMS.$(SHS_VER)
-	mkdir -p RPMS.$(SHS_VER)
-	@for platform in $(MULTIARCH_PLATFORMS); do \
-	  tag=$${platform#linux/}; \
-	  echo "==> Merging RPMS.$(SHS_VER).$$tag/ into RPMS.$(SHS_VER)/"; \
-	  cp -a RPMS.$(SHS_VER).$$tag/* RPMS.$(SHS_VER)/ ; \
-	  rm -rf RPMS.$(SHS_VER).$$tag ; \
-	done
+	docker buildx build \
+	  --platform $(PLATFORMS) \
+	  --target rpms \
+	  --output type=local,dest=./RPMS.$(SHS_VER),platform-split=false \
+	  --build-arg SHS_VER=$(SHS_VER) \
+	  $(DOCKEROPTS) .
 	rm -rf RPMS.$(SHS_VER)/repodata
-	docker run --rm -v "$$(pwd)/RPMS.$(SHS_VER):/RPMS:z" \
-	  registry.opensuse.org/opensuse/leap:16.0 \
-	  sh -c 'zypper --non-interactive install createrepo_c >/dev/null 2>&1 && createrepo /RPMS'
+	printf '%s\n' \
+	    'FROM registry.opensuse.org/opensuse/leap:16.0' \
+	    'RUN zypper --non-interactive install createrepo_c' \
+	    'COPY . /RPMS' \
+	    'RUN createrepo /RPMS' \
+	    'FROM scratch' \
+	    'COPY --from=0 /RPMS/repodata /repodata' \
+	  | docker buildx build -f - \
+	    --output type=local,dest=./RPMS.$(SHS_VER) \
+	    RPMS.$(SHS_VER)
 	@echo "==> Multi-arch repository ready in RPMS.$(SHS_VER)/"
 
 .PHONY: versions
