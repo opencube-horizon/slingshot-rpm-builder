@@ -11,3 +11,6 @@ RPMS.*/
 # Editor backups
 \#*\#
 *~
+
+# Session files
+opencode-sessions.sh

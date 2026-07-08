@@ -1,0 +1,82 @@
+--- lustre.orig/lustre.spec.in	2025-11-18 09:06:18
++++ lustre/lustre.spec.in	2025-11-18 15:11:43
+@@ -77,8 +77,13 @@
+ %if %{defined kobjdir}
+ 	%define _take_kobj 1
+ %endif
+-%{!?kdir:    %global kdir    /lib/modules/%{_kver}/source}
+-%{!?kobjdir: %global kobjdir %(if [ "%{kdir}" = "/lib/modules/%{_kver}/source" ]; then echo "/lib/modules/%{_kver}/build"; else echo "%{kdir}"; fi)}
++%if 0%{?suse_version} >= 1600
++%define _mod_dir /usr/lib/modules
++%else
++%define _mod_dir /lib/modules
++%endif
++%{!?kdir:    %global kdir    %{_mod_dir}/%{_kver}/source}
++%{!?kobjdir: %global kobjdir %(if [ "%{kdir}" = "%{_mod_dir}/%{_kver}/source" ]; then echo "%{_mod_dir}/%{_kver}/build"; else echo "%{kdir}"; fi)}
+ 
+ %if %{defined _take_kver}
+ # as an alternative to this implementation we could simply "make -C $kdir kernelversion"
+@@ -150,7 +155,8 @@
+     %endif
+ %endif
+ 
+-%global modules_fs_path /lib/modules/%{_kver}/%{kmoddir}
++%global modules_fs_path %{_mod_dir}/%{_kver}/%{kmoddir}
++
+ # requires want to set a version including epoch
+ %global krequires %(echo %{kver} | sed -e 's/\.x86_64$//' -e 's/\.i[3456]86$//' -e 's/-smp$//' -e 's/-bigsmp$//' -e 's/[-.]ppc64$//' -e 's/\.aarch64$//' -e 's/-default$//' -e 's/-%{_flavor}//')
+ 
+@@ -276,7 +282,8 @@
+ %if 0%{?rhel} >= 8 || 0%{?openEuler}
+ BuildRequires: kernel-rpm-macros
+ %endif
+-%if 0%{?sle_version} >= 150300
++# Leap >16 does not define sle_version
++%if 0%{?sle_version} >= 150300 || 0%{?suse_version} >= 1600
+ BuildRequires: rpm-build >= 4.14.3
+ %endif
+ %endif
+@@ -524,7 +531,7 @@
+ %if "%{_vendor}" == "redhat" || 0%{?openEuler} || 0%{?suse_version} < 1500
+ BuildRequires: openmpi-devel
+ %else
+-%if 0%{?sle_version} && 0%{?sle_version} >= 150600
++%if 0%{?sle_version} >= 150600 || 0%{?suse_version} >= 1600
+ BuildRequires: openmpi4-devel
+ %else
+ BuildRequires: openmpi2-devel
+@@ -653,7 +660,8 @@
+ This survey tests LNet performance between a group of clients and servers.
+ %endif
+ 
+-%if 0%{?suse_version}
++# Starting with Leap 16 SUSE builds the debug packages automatically
++%if 0%{?suse_version} < 1600
+ %debug_package
+ %endif
+ %prep
+@@ -821,6 +829,15 @@
+ make install DESTDIR=$RPM_BUILD_ROOT
+ 
+ %if %{with lustre_modules}
++
++# Leap >16 is expecting modules in /usr/lib/modules, otherwise post-RPM scripts break when setting up weak-updates.
++# Lustre has /lib/modules hardcoded in config/lustre-build-linux.m4 with moduledir="/lib/modules/..."
++# Do this change now until we see other distros requiring similar treatment.
++%if 0%{?suse_version} >= 1600
++mkdir -p $RPM_BUILD_ROOT%{_mod_dir}
++mv $RPM_BUILD_ROOT/lib/modules/* $RPM_BUILD_ROOT%{_mod_dir}
++%endif
++
+ # RHEL's kernel_module_path macro expects that all the modules
+ # in a kmod package will be in modules_fs_path/<sub packagename>
+ # but Lustre installs all of the modules in a single pass into
+@@ -946,7 +963,7 @@
+ echo '%{_prefix}/lib/firewalld/services/*.xml' >>lustre.files
+ %if %{with lustre_modules}
+ # mark modules executable for find-debuginfo.sh
+-find $RPM_BUILD_ROOT/lib/modules -name \*.ko -type f -exec chmod u+x {} \;
++find $RPM_BUILD_ROOT/%{_mod_dir} -name \*.ko -type f -exec chmod u+x {} \;
+ %endif
+ 
+ rm -f $RPM_BUILD_ROOT%{_libdir}/liblustreapi.la

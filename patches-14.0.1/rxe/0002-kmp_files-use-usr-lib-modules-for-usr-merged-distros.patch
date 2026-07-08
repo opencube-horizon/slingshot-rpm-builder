@@ -1,0 +1,36 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Tiziano=20M=C3=BCller?= <tiziano.mueller@hpe.com>
+Date: Tue, 25 Mar 2026 10:00:00 +0100
+Subject: [PATCH] kmp_files: use /usr/lib/modules for usr-merged distros
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+On distributions with usr-merge (e.g. openSUSE Leap 16.0), the kernel
+installs modules under /usr/lib/modules/ rather than /lib/modules/.
+The modules_install make target writes to the correct usr-merged path,
+but the kmp_files template still references /lib/modules/%2-%1, causing
+rpmbuild to fail with "File not found" when packaging KMP subpackages:
+
+  error: File not found: .../BUILDROOT/.../lib/modules/6.12.0-...-default/...
+  error: File not found: .../BUILDROOT/.../lib/modules/6.12.0-...-64kb/...
+
+Use the %{kernel_module_directory} RPM macro -- the same macro the
+default %kernel_module_package file list uses -- so the path resolves
+to /usr/lib/modules on usr-merged systems and /lib/modules on
+traditional layouts.
+
+Signed-off-by: Tiziano Mueller <tiziano.mueller@hpe.com>
+---
+ kmp_files | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/kmp_files b/kmp_files
+index 1234567..abcdefg 100644
+--- a/kmp_files
++++ b/kmp_files
+@@ -1,3 +1,3 @@
+ %defattr (-,root,root)
+-/lib/modules/%2-%1
++%{kernel_module_directory}/%2-%1
+ /usr/bin/rxe_init.sh

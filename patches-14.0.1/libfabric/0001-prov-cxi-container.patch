@@ -1,0 +1,54 @@
+Subject: [PATCH] prov/cxi: move netdev_{link,speed,lookup} to query cxi_user instead of ethernet sysfs entries
+prov/cxi: move netdev_{link,speed,lookup} to query cxi_user instead of ethernet sysfs entries This adds support for running the CXI provider within a container.
+Note: This is a slimmed-down version of the 13.0.0 container patch.  Only the cxip_if.c sysfs path changes are needed; 14.0.0 already has native network namespace support via cxil_svc_get_netns().
+---
+Index: prov/cxi/src/cxip_if.c
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/prov/cxi/src/cxip_if.c b/prov/cxi/src/cxip_if.c
+--- a/prov/cxi/src/cxip_if.c	(revision cf173800a23505a0c6ec9ad42b935bde60a57da2)
++++ b/prov/cxi/src/cxip_if.c	(revision 7f10625aedb77d181fff086ad10430be1f330bbd)
+@@ -360,6 +360,23 @@
+ 	char state[20];
+ 	int carrier;
+ 
++	rc = snprintf(path, CXIP_PATH_MAX, "/sys/class/cxi_user/%s/device/properties/link",
++		      netdev);
++	if (rc < 0)
++		return -1;
++
++	f = fopen(path, "r");
++	if (!f)
++		return -1;
++
++	rc = fscanf(f, "%20s", state);
++
++	fclose(f);
++
++	if (!strncmp(state, "1", strlen("1"))) {
++		*link = 1;
++		return 0;
++	}
+ 	rc = snprintf(path, CXIP_PATH_MAX, "/sys/class/net/%s/operstate",
+ 		      netdev);
+ 	if (rc < 0)
+@@ -416,7 +433,7 @@
+ 	FILE *f;
+ 	int val;
+ 
+-	rc = snprintf(path, CXIP_PATH_MAX, "/sys/class/net/%s/speed",
++	rc = snprintf(path, CXIP_PATH_MAX, "/sys/class/cxi_user/%s/device/properties/speed",
+ 		      netdev);
+ 	if (rc < 0)
+ 		return -1;
+@@ -454,7 +471,7 @@
+ 	unsigned int dev;
+ 	unsigned int func;
+ 
+-	rc = glob("/sys/class/net/*", 0, NULL, &globbuf);
++	rc = glob("/sys/class/cxi_user/*", 0, NULL, &globbuf);
+ 	if (rc)
+ 		return -1;
+ 

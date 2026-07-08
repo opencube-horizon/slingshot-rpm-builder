@@ -1,0 +1,51 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Tiziano=20M=C3=BCller?= <tiziano.mueller@hpe.com>
+Date: Mon, 30 Jun 2026 16:00:00 +0200
+Subject: [PATCH] spec: fix duplicate %dir and unpackaged modules.* files
+
+1. Remove the redundant "%dir" line from dkms-files: the directory is
+   already included by the recursive listing of ${dkms_source_dir}.
+2. Remove depmod-generated modules.* and module.symvers.sl on all distros
+   (not only RHEL), and drop the now-unnecessary %exclude lines.
+---
+ sl-driver.spec | 13 ++++---------
+ 1 file changed, 4 insertions(+), 9 deletions(-)
+
+diff --git a/sl-driver.spec b/sl-driver.spec
+--- a/sl-driver.spec
++++ b/sl-driver.spec
+@@ -111,11 +111,10 @@
+     install -D $PWD/obj/$flavor/drivers/net/ethernet/hpe/sl/Module.symvers  $RPM_BUILD_ROOT/%{prefix}/src/sl/$flavor/Module.symvers
+ done
+ 
+-%if 0%{?rhel}
+-# Centos/Rocky/RHEL does not exclude the depmod-generated modules.* files from
+-# the RPM, causing file conflicts when updating
++# Remove depmod-generated files which conflict across kernel versions
++# and the module.symvers.sl leftover from the build
+ find $RPM_BUILD_ROOT -iname 'modules.*' -exec rm {} \;
+-%endif
++find $RPM_BUILD_ROOT -iname 'module.symvers.sl' -exec rm {} \;
+ 
+ # DKMS bits
+ dkms_source_dir=%{dkms_source_tree}/%{name}-%{version}-%{release}
+@@ -189,8 +188,7 @@
+ 
+ rm %{buildroot}/${dkms_source_dir}/dkms.conf.in
+ 
+-echo "%dir ${dkms_source_dir}" > dkms-files
+-echo "${dkms_source_dir}" >> dkms-files
++echo "${dkms_source_dir}" > dkms-files
+ 
+ %pre dkms
+ 
+@@ -235,10 +233,6 @@
+ 
+ %files dkms -f dkms-files
+ 
+-%exclude /lib/modules/module.symvers.sl
+-%exclude /lib/modules/modules.builtin
+-%exclude /lib/modules/modules.order
+-
+ %changelog
+ * Tue Jan 20 2026 Slingshot Platform Team <hpcdev_ss_plat@hpe.com> 1.20.18

@@ -1,5 +1,5 @@
 
-.PHONY: all prepare build pkgs repo
+.PHONY: all prepare build pkgs repo userland userland-repo
 
 SHS_VER := 14.0.0
 LUSTRE_VER := 2.17.0
@@ -35,6 +35,9 @@ ARCH := $(shell uname -m)
 # or should we use `uname -p`, or `arch`?
 
 PLATFORMS := linux/amd64,linux/arm64
+
+# libfabric configure options: disable providers that pull in rdma-core (we only use CXI)
+LIBFABRIC_CONFIGOPTS ?= --disable-verbs --disable-efa --disable-opx --disable-psm3 LDFLAGS=-Wl,--build-id
 
 # TODO: package revisions are currently hardcoded
 
@@ -334,6 +337,9 @@ rpmbuild/RPMS/$(ARCH)/cray-rxe-driver-devel-%.$(ARCH).rpm:
 kdreg2-rpm: src/kdreg2
 	$(MAKE) "rpmbuild/RPMS/$(ARCH)/kdreg2-devel-$(kdreg2_ver)-0.$(ARCH).rpm"
 
+kdreg2-install: kdreg2-rpm
+	rpm -i --force "rpmbuild/RPMS/$(ARCH)/kdreg2-devel-$(kdreg2_ver)-0.$(ARCH).rpm"
+
 rpmbuild/RPMS/$(ARCH)/kdreg2-devel-%.$(ARCH).rpm:
 	mkdir -p rpmbuild/SOURCES "rpmbuild/RPMS/$(ARCH)"
 	tar --transform "s,^src/kdreg2/,kdreg2-$(pkg_ver)/," -cf "rpmbuild/SOURCES/kdreg2-$(pkg_ver).tar.gz" src/kdreg2
@@ -347,7 +353,7 @@ rpmbuild/RPMS/noarch/slingshot-firmware-management-%.noarch.rpm:
 	tar --transform "s,^src/firmware-management/,slingshot-firmware-management-$(pkg_ver)/," -cf "rpmbuild/SOURCES/slingshot-firmware-management-$(pkg_ver).tar.gz" src/firmware-management
 	env -i BUILD_METADATA="$(pkg_rev)" PATH="$(PATH)" rpmbuild --define "_topdir $(CURDIR)/rpmbuild" -ba src/firmware-management/slingshot-firmware-management.spec
 
-libfabric-rpm: src/libfabric libcxi-install cassini-headers-install
+libfabric-rpm: src/libfabric libcxi-install cassini-headers-install kdreg2-install
 	$(MAKE) "rpmbuild/RPMS/$(ARCH)/libfabric-$(libfabric_ver)-1.$(ARCH).rpm"
 
 rpmbuild/RPMS/$(ARCH)/libfabric-%.$(ARCH).rpm:
@@ -356,7 +362,7 @@ rpmbuild/RPMS/$(ARCH)/libfabric-%.$(ARCH).rpm:
 	sed -i 's/AC_INIT(\[libfabric\], \[[^]]*\]/AC_INIT([libfabric], [$(pkg_ver)]/' src/libfabric/configure.ac
 	cd src/libfabric && ./autogen.sh && ./configure && make dist
 	cp "src/libfabric/libfabric-$(pkg_ver).tar.bz2" rpmbuild/SOURCES/
-	env -i PATH="$(PATH)" rpmbuild --define "_topdir $(CURDIR)/rpmbuild" -ba src/libfabric/libfabric.spec
+	env -i PATH="$(PATH)" rpmbuild --define "_topdir $(CURDIR)/rpmbuild" --define "configopts $(LIBFABRIC_CONFIGOPTS)" -ba src/libfabric/libfabric.spec
 
 lustre-rpm: SHELL := bash -l
 lustre-rpm: src/lustre kfabric-install
@@ -376,3 +382,49 @@ lustre-rpm: src/lustre kfabric-install
 
 rpmbuild/RPMS/repodata/repomd.xml: $(PKGS)
 	createrepo rpmbuild/RPMS
+
+# ─── Userland RPM targets ────────────────────────────────────────────────────
+
+userland: RPMS.$(SHS_VER)
+	docker buildx build -f Dockerfile.userland \
+		--build-context base-rpms=./RPMS.$(SHS_VER) \
+		--target rpms \
+		--output type=local,dest=./RPMS.userland.$(SHS_VER) \
+		--build-arg SHS_VER=$(SHS_VER) \
+		$(DOCKEROPTS) \
+		.
+
+userland-interactive: RPMS.$(SHS_VER)
+	docker buildx build -f Dockerfile.userland --load --target buildenv \
+		--build-context base-rpms=./RPMS.$(SHS_VER) \
+		--build-arg SHS_VER=$(SHS_VER) \
+		-t slingshot-userland-builder \
+		.
+	docker run -ti --rm $(DOCKEROPTS) \
+		slingshot-userland-builder:latest \
+		/bin/bash -l
+
+userland-repo: RPMS.$(SHS_VER)
+	@for platform in $(MULTIARCH_PLATFORMS); do \
+	  tag=$${platform#linux/}; \
+	  echo "==> Building userland RPMs for $$platform -> RPMS.userland.$(SHS_VER).$$tag/"; \
+	  docker buildx build -f Dockerfile.userland --platform $$platform \
+	    --build-context base-rpms=./RPMS.$(SHS_VER) \
+	    --target rpms \
+	    --output type=local,dest=./RPMS.userland.$(SHS_VER).$$tag \
+	    --build-arg SHS_VER=$(SHS_VER) \
+	    $(DOCKEROPTS) . ; \
+	done
+	rm -rf RPMS.userland.$(SHS_VER)
+	mkdir -p RPMS.userland.$(SHS_VER)
+	@for platform in $(MULTIARCH_PLATFORMS); do \
+	  tag=$${platform#linux/}; \
+	  echo "==> Merging RPMS.userland.$(SHS_VER).$$tag/ into RPMS.userland.$(SHS_VER)/"; \
+	  cp -a RPMS.userland.$(SHS_VER).$$tag/* RPMS.userland.$(SHS_VER)/ ; \
+	  rm -rf RPMS.userland.$(SHS_VER).$$tag ; \
+	done
+	rm -rf RPMS.userland.$(SHS_VER)/repodata
+	docker run --rm -v "$$(pwd)/RPMS.userland.$(SHS_VER):/RPMS:z" \
+	  registry.opensuse.org/opensuse/leap:16.0 \
+	  sh -c 'zypper --non-interactive install createrepo_c >/dev/null 2>&1 && createrepo /RPMS'
+	@echo "==> Multi-arch userland repository ready in RPMS.userland.$(SHS_VER)/"

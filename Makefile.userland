@@ -1,0 +1,287 @@
+# Makefile.userland — Builds userland RPMs inside the Docker container
+#
+# Run as: make -f Makefile.userland rpmbuild/RPMS/repodata/repomd.xml
+#
+# Expects base SHS RPMs (libfabric, libcxi) already installed in the system.
+# Build scope: Layer 1 (argobots, mercury, mpich, mpich5, openmpi)
+#              Layer 2 (isa-l, daos-client, mpi4py-mpich, mpi4py-openmpi)
+# Note: mpi4py-mpich5 skipped (mpi4py 4.0.1 incompatible with MPICH 5.x FT API)
+
+.PHONY: all
+
+ARCH := $(shell uname -m)
+TOPDIR := $(CURDIR)/rpmbuild
+
+# ─── Package versions ────────────────────────────────────────────────────────
+ARGOBOTS_VER := 1.2
+MERCURY_VER  := 2.4.1
+MPICH_VER    := 4.3.2
+MPICH5_VER   := 5.0.1
+OPENMPI_VER  := 5.0.10
+MPI4PY_VER   := 4.0.1
+ISAL_VER     := 2.32.1
+ISAL_CRYPTO_VER := 2.26.1
+FUSED_VER    := 1.0.0
+DAOS_VER     := 2.8.0
+
+# ─── Source URLs ─────────────────────────────────────────────────────────────
+URL_argobots := https://github.com/pmodels/argobots/archive/refs/tags/v$(ARGOBOTS_VER).tar.gz
+URL_mercury  := https://github.com/mercury-hpc/mercury/releases/download/v$(MERCURY_VER)/mercury-$(MERCURY_VER).tar.bz2
+URL_mpich    := https://www.mpich.org/static/downloads/$(MPICH_VER)/mpich-$(MPICH_VER).tar.gz
+URL_mpich5   := https://www.mpich.org/static/downloads/$(MPICH5_VER)/mpich-$(MPICH5_VER).tar.gz
+URL_openmpi  := https://download.open-mpi.org/release/open-mpi/v$(firstword $(subst ., ,$(OPENMPI_VER))).$(word 2,$(subst ., ,$(OPENMPI_VER)))/openmpi-$(OPENMPI_VER).tar.bz2
+URL_mpi4py   := https://github.com/mpi4py/mpi4py/releases/download/$(MPI4PY_VER)/mpi4py-$(MPI4PY_VER).tar.gz
+URL_isal     := https://github.com/intel/isa-l/archive/refs/tags/v$(ISAL_VER).tar.gz
+URL_isal_crypto := https://github.com/intel/isa-l_crypto/archive/refs/tags/v$(ISAL_CRYPTO_VER).tar.gz
+URL_fused    := https://github.com/daos-stack/fused/archive/refs/tags/v$(FUSED_VER).tar.gz
+URL_daos     := https://github.com/daos-stack/daos/archive/refs/heads/release/2.8.tar.gz
+
+# ─── Targets ─────────────────────────────────────────────────────────────────
+all: rpmbuild/RPMS/repodata/repomd.xml
+
+# Layer 1: argobots (standalone)
+ARGOBOTS_RPM := $(TOPDIR)/RPMS/$(ARCH)/argobots-$(ARGOBOTS_VER)-1.$(ARCH).rpm
+
+# Layer 1: mercury (needs argobots + libfabric)
+MERCURY_RPM := $(TOPDIR)/RPMS/$(ARCH)/mercury-$(MERCURY_VER)-1.$(ARCH).rpm
+
+# Layer 1: mpich 4.x (needs libfabric)
+MPICH_RPM := $(TOPDIR)/RPMS/$(ARCH)/mpich-$(MPICH_VER)-1.$(ARCH).rpm
+
+# Layer 1: mpich 5.x (needs libfabric)
+MPICH5_RPM := $(TOPDIR)/RPMS/$(ARCH)/mpich5-$(MPICH5_VER)-1.$(ARCH).rpm
+
+# Layer 1: openmpi (needs libfabric)
+OPENMPI_RPM := $(TOPDIR)/RPMS/$(ARCH)/openmpi-$(OPENMPI_VER)-1.$(ARCH).rpm
+
+# Layer 2: mpi4py (needs mpich + mpich5 + openmpi)
+MPI4PY_MPICH_RPM   := $(TOPDIR)/RPMS/$(ARCH)/python3-mpi4py-mpich-$(MPI4PY_VER)-1.$(ARCH).rpm
+MPI4PY_MPICH5_RPM  := $(TOPDIR)/RPMS/$(ARCH)/python3-mpi4py-mpich5-$(MPI4PY_VER)-1.$(ARCH).rpm
+MPI4PY_OPENMPI_RPM := $(TOPDIR)/RPMS/$(ARCH)/python3-mpi4py-openmpi-$(MPI4PY_VER)-1.$(ARCH).rpm
+
+# Layer 2: daos-client (needs mercury, argobots, isa-l)
+DAOS_RPM := $(TOPDIR)/RPMS/$(ARCH)/daos-client-$(DAOS_VER)-1.$(ARCH).rpm
+
+# ISA-L (needed by DAOS for erasure coding)
+ISAL_RPM := $(TOPDIR)/RPMS/$(ARCH)/libisal-$(ISAL_VER)-1.$(ARCH).rpm
+ISAL_CRYPTO_RPM := $(TOPDIR)/RPMS/$(ARCH)/libisal_crypto-$(ISAL_CRYPTO_VER)-1.$(ARCH).rpm
+
+LAYER1_RPMS := $(ARGOBOTS_RPM) $(MERCURY_RPM) $(MPICH_RPM) $(MPICH5_RPM) $(OPENMPI_RPM)
+LAYER2_RPMS := $(ISAL_RPM) $(ISAL_CRYPTO_RPM) $(DAOS_RPM) $(MPI4PY_MPICH_RPM) $(MPI4PY_OPENMPI_RPM)
+
+# ─── Source fetching ─────────────────────────────────────────────────────────
+# GitHub archives extract to <name>-<version>/ so --strip-components=1 normalizes
+src/argobots:
+	mkdir -p "$@"
+	curl -fsSL "$(URL_argobots)" | tar -xz --strip-components=1 -C "$@"
+
+src/mercury:
+	mkdir -p "$@"
+	curl -fsSL "$(URL_mercury)" | tar -xj --strip-components=1 -C "$@"
+
+src/mpich:
+	mkdir -p "$@"
+	curl -fsSL "$(URL_mpich)" | tar -xz --strip-components=1 -C "$@"
+
+src/mpich5:
+	mkdir -p "$@"
+	curl -fsSL "$(URL_mpich5)" | tar -xz --strip-components=1 -C "$@"
+
+src/openmpi:
+	mkdir -p "$@"
+	curl -fsSL "$(URL_openmpi)" | tar -xj --strip-components=1 -C "$@"
+
+src/mpi4py:
+	mkdir -p "$@"
+	curl -fsSL "$(URL_mpi4py)" | tar -xz --strip-components=1 -C "$@"
+
+src/isa-l:
+	mkdir -p "$@"
+	curl -fsSL "$(URL_isal)" | tar -xz --strip-components=1 -C "$@"
+
+src/isa-l_crypto:
+	mkdir -p "$@"
+	curl -fsSL "$(URL_isal_crypto)" | tar -xz --strip-components=1 -C "$@"
+
+src/daos:
+	mkdir -p "$@"
+	curl -fsSL "$(URL_daos)" | tar -xz --strip-components=1 -C "$@"
+
+src/fused:
+	mkdir -p "$@"
+	curl -fsSL "$(URL_fused)" | tar -xz --strip-components=1 -C "$@"
+
+# fused: DAOS's fork of libfuse3 (static library, build-time only)
+fused-install: src/fused
+	cd src/fused && meson setup build --strip -Ddisable-mtab=true -Dutils=false --default-library static --prefix=/usr
+	cd src/fused && ninja -C build
+	cd src/fused && ninja -C build install
+
+# ─── Layer 1: argobots ───────────────────────────────────────────────────────
+$(ARGOBOTS_RPM): src/argobots
+	mkdir -p $(TOPDIR)/{SOURCES,RPMS/$(ARCH)}
+	tar -czf $(TOPDIR)/SOURCES/argobots-$(ARGOBOTS_VER).tar.gz \
+	  --transform "s,^src/argobots,argobots-$(ARGOBOTS_VER)," src/argobots
+	rpmbuild --define "_topdir $(TOPDIR)" \
+	  --define "argobots_version $(ARGOBOTS_VER)" \
+	  -ba specs/argobots.spec
+
+argobots-install: $(ARGOBOTS_RPM)
+	rpm -ivh --force --nodeps $(TOPDIR)/RPMS/$(ARCH)/argobots-*.rpm
+
+# ─── Layer 1: mercury ────────────────────────────────────────────────────────
+$(MERCURY_RPM): src/mercury argobots-install
+	mkdir -p $(TOPDIR)/{SOURCES,RPMS/$(ARCH)}
+	tar -czf $(TOPDIR)/SOURCES/mercury-$(MERCURY_VER).tar.gz \
+	  --transform "s,^src/mercury,mercury-$(MERCURY_VER)," src/mercury
+	rpmbuild --define "_topdir $(TOPDIR)" \
+	  --define "mercury_version $(MERCURY_VER)" \
+	  -ba specs/mercury.spec
+
+mercury-install: $(MERCURY_RPM)
+	rpm -ivh --force --nodeps $(TOPDIR)/RPMS/$(ARCH)/mercury-*.rpm
+
+# ─── Layer 1: mpich 4.x ─────────────────────────────────────────────────────
+$(MPICH_RPM): src/mpich
+	mkdir -p $(TOPDIR)/{SOURCES,RPMS/$(ARCH)}
+	tar -czf $(TOPDIR)/SOURCES/mpich-$(MPICH_VER).tar.gz \
+	  --transform "s,^src/mpich,mpich-$(MPICH_VER)," src/mpich
+	rpmbuild --define "_topdir $(TOPDIR)" \
+	  --define "mpich_version $(MPICH_VER)" \
+	  -ba specs/mpich.spec
+
+mpich-install: $(MPICH_RPM)
+	rpm -ivh --force --nodeps $(TOPDIR)/RPMS/$(ARCH)/mpich-*.rpm
+
+# ─── Layer 1: mpich 5.x ─────────────────────────────────────────────────────
+$(MPICH5_RPM): src/mpich5
+	mkdir -p $(TOPDIR)/{SOURCES,RPMS/$(ARCH)}
+	tar -czf $(TOPDIR)/SOURCES/mpich-$(MPICH5_VER).tar.gz \
+	  --transform "s,^src/mpich5,mpich-$(MPICH5_VER)," src/mpich5
+	rpmbuild --define "_topdir $(TOPDIR)" \
+	  --define "mpich5_version $(MPICH5_VER)" \
+	  -ba specs/mpich5.spec
+
+mpich5-install: $(MPICH5_RPM)
+	rpm -ivh --force --nodeps $(TOPDIR)/RPMS/$(ARCH)/mpich5-*.rpm
+
+# ─── Layer 1: openmpi ────────────────────────────────────────────────────────
+$(OPENMPI_RPM): src/openmpi
+	mkdir -p $(TOPDIR)/{SOURCES,RPMS/$(ARCH)}
+	tar -czf $(TOPDIR)/SOURCES/openmpi-$(OPENMPI_VER).tar.bz2 \
+	  --transform "s,^src/openmpi,openmpi-$(OPENMPI_VER)," src/openmpi
+	rpmbuild --define "_topdir $(TOPDIR)" \
+	  --define "openmpi_version $(OPENMPI_VER)" \
+	  -ba specs/openmpi.spec
+
+openmpi-install: $(OPENMPI_RPM)
+	rpm -ivh --force --nodeps $(TOPDIR)/RPMS/$(ARCH)/openmpi-*.rpm
+
+# ─── Layer 2: mpi4py ─────────────────────────────────────────────────────────
+$(MPI4PY_MPICH_RPM): src/mpi4py mpich-install
+	mkdir -p $(TOPDIR)/{SOURCES,RPMS/$(ARCH)}
+	tar -czf $(TOPDIR)/SOURCES/mpi4py-$(MPI4PY_VER).tar.gz \
+	  --transform "s,^src/mpi4py,mpi4py-$(MPI4PY_VER)," src/mpi4py
+	rpmbuild --define "_topdir $(TOPDIR)" \
+	  --define "mpi_flavor mpich" \
+	  -ba specs/python-mpi4py.spec
+
+$(MPI4PY_MPICH5_RPM): src/mpi4py mpich5-install
+	mkdir -p $(TOPDIR)/{SOURCES,RPMS/$(ARCH)}
+	tar -czf $(TOPDIR)/SOURCES/mpi4py-$(MPI4PY_VER).tar.gz \
+	  --transform "s,^src/mpi4py,mpi4py-$(MPI4PY_VER)," src/mpi4py
+	rpmbuild --define "_topdir $(TOPDIR)" \
+	  --define "mpi_flavor mpich5" \
+	  -ba specs/python-mpi4py.spec
+
+$(MPI4PY_OPENMPI_RPM): src/mpi4py openmpi-install
+	mkdir -p $(TOPDIR)/{SOURCES,RPMS/$(ARCH)}
+	tar -czf $(TOPDIR)/SOURCES/mpi4py-$(MPI4PY_VER).tar.gz \
+	  --transform "s,^src/mpi4py,mpi4py-$(MPI4PY_VER)," src/mpi4py
+	rpmbuild --define "_topdir $(TOPDIR)" \
+	  --define "mpi_flavor openmpi" \
+	  -ba specs/python-mpi4py.spec
+
+# ─── Layer 2: ISA-L (needed by DAOS) ─────────────────────────────────────────
+$(ISAL_RPM): src/isa-l
+	mkdir -p $(TOPDIR)/{SOURCES,RPMS/$(ARCH)}
+	tar -czf $(TOPDIR)/SOURCES/isa-l-$(ISAL_VER).tar.gz \
+	  --transform "s,^src/isa-l,isa-l-$(ISAL_VER)," src/isa-l
+	rpmbuild --define "_topdir $(TOPDIR)" \
+	  --define "isal_ver $(ISAL_VER)" \
+	  -ba specs/isa-l.spec
+
+isal-install: $(ISAL_RPM)
+	rpm -ivh --force --nodeps $(TOPDIR)/RPMS/$(ARCH)/libisal-*.rpm
+
+$(ISAL_CRYPTO_RPM): src/isa-l_crypto
+	mkdir -p $(TOPDIR)/{SOURCES,RPMS/$(ARCH)}
+	tar -czf $(TOPDIR)/SOURCES/isa-l_crypto-$(ISAL_CRYPTO_VER).tar.gz \
+	  --transform "s,^src/isa-l_crypto,isa-l_crypto-$(ISAL_CRYPTO_VER)," src/isa-l_crypto
+	rpmbuild --define "_topdir $(TOPDIR)" \
+	  --define "isal_crypto_ver $(ISAL_CRYPTO_VER)" \
+	  -ba specs/isa-l_crypto.spec
+
+isal-crypto-install: $(ISAL_CRYPTO_RPM)
+	rpm -ivh --force --nodeps $(TOPDIR)/RPMS/$(ARCH)/libisal_crypto-*.rpm
+
+# ─── Layer 2: daos-client ────────────────────────────────────────────────────
+$(DAOS_RPM): src/daos mercury-install argobots-install isal-install isal-crypto-install fused-install
+	mkdir -p $(TOPDIR)/{SOURCES,RPMS/$(ARCH)}
+	tar -czf $(TOPDIR)/SOURCES/daos-$(DAOS_VER).tar.gz \
+	  --transform "s,^src/daos,daos-$(DAOS_VER)," src/daos
+	# --- Patch upstream spec for client-only build on openSUSE Leap 16.0 ---
+	# Step 1: Fix package names and remove unsatisfiable BuildRequires
+	sed -i \
+	  -e 's/libabt-devel/argobots-devel/' \
+	  -e '/BuildRequires:.*fused-devel/d' \
+	  -e '/^BuildRequires:.*%{openmpi}-devel/d' \
+	  -e '/^BuildRequires:.*hdf5-devel/d' \
+	  -e '/%debug_package/d' \
+	  -e '/__debug_package/d' \
+	  -e '/_debuginfo_subpackages/d' \
+	  -e '/^Source1:/d' \
+	  -e '/__find_requires.*SOURCE1/d' \
+	  src/daos/utils/rpms/daos.spec
+	# Step 2: Build client only (no test binaries — they need openmpi)
+	sed -i 's/^%global daos_build_args client test/%global daos_build_args client/' \
+	  src/daos/utils/rpms/daos.spec
+	# Step 3: Remove %install lines that reference TESTING/ftest (won't exist)
+	sed -i '/TESTING\/ftest/d' src/daos/utils/rpms/daos.spec
+	# Step 4: Remove subpackages we don't build (tests, serialize, mofed-shim)
+	# Uses awk to cleanly excise multi-line %package/%description/%files blocks
+	awk '\
+	  /^%package (tests|tests-internal|client-tests|serialize|mofed-shim)/ { skip=1; next } \
+	  /^%description (tests|tests-internal|client-tests|serialize|mofed-shim)/ { skip=1; next } \
+	  /^%files (tests|tests-internal|client-tests|serialize|mofed-shim)/ { skip=1; next } \
+	  skip && /^%(package|description|files|prep|build|install|pre |post |preun|postun|changelog|check|if |endif)/ { skip=0 } \
+	  !skip { print } \
+	' src/daos/utils/rpms/daos.spec > src/daos/utils/rpms/daos.spec.tmp
+	mv src/daos/utils/rpms/daos.spec.tmp src/daos/utils/rpms/daos.spec
+	# Step 5: Exclude fault-inject config (installed by scons but not needed in client RPM)
+	sed -i '/^%files client$$/a %exclude /etc/daos/fault-inject-cart.yaml' \
+	  src/daos/utils/rpms/daos.spec
+	rpmbuild --define "_topdir $(TOPDIR)" \
+	  --without server \
+	  -ba src/daos/utils/rpms/daos.spec
+
+# ─── Parallel stack targets (used by Dockerfile parallel stages) ──────────────
+.PHONY: stack-mercury stack-mpich stack-mpich5 stack-openmpi
+
+# Stack 1: argobots + mercury + isa-l + daos-client
+stack-mercury: $(DAOS_RPM)
+
+# Stack 2: mpich + mpi4py-mpich
+stack-mpich: $(MPI4PY_MPICH_RPM)
+
+# Stack 3: mpich5 (mpi4py-mpich5 skipped — API incompatible)
+stack-mpich5: $(MPICH5_RPM)
+
+# Stack 4: openmpi + mpi4py-openmpi
+stack-openmpi: $(MPI4PY_OPENMPI_RPM)
+
+# ─── Repository metadata ─────────────────────────────────────────────────────
+rpmbuild/RPMS/repodata/repomd.xml: $(LAYER1_RPMS) $(LAYER2_RPMS)
+	createrepo $(TOPDIR)/RPMS
+
+.PHONY: argobots-install mercury-install mpich-install mpich5-install openmpi-install isal-install isal-crypto-install fused-install

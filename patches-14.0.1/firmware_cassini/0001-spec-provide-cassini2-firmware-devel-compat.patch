@@ -1,0 +1,25 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Tiziano=20M=C3=BCller?= <tiziano.mueller@hpe.com>
+Date: Mon, 30 Jun 2026 16:00:00 +0200
+Subject: [PATCH] spec: provide cassini2-firmware-devel for backwards
+ compatibility
+
+cxi-driver still BuildRequires cassini2-firmware-devel (the old package
+name).  Add Provides/Obsoletes so the renamed package satisfies the
+dependency.
+---
+ cassini-firmware-headers.spec | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/cassini-firmware-headers.spec b/cassini-firmware-headers.spec
+--- a/cassini-firmware-headers.spec
++++ b/cassini-firmware-headers.spec
+@@ -7,6 +7,8 @@ BuildRoot: %{_tmppath}/%{name}-%{version}-%{release}-root-%(%{__id_u} -n)
+ BuildArch: noarch
+ Vendor: Hewlett Packard Enterprise
+ Packager: Hewlett Packard Enterprise
++Provides: cassini2-firmware-devel = %{version}-%{release}
++Obsoletes: cassini2-firmware-devel < %{version}-%{release}
+ %description
+ This package contains header files for Cassini firmware
+ 

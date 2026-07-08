@@ -15,8 +15,9 @@ ARG TARGETPLATFORM
 # openmpi4-devel..libmount-devel: required for Lustre
 RUN --mount=type=cache,id=zypp-buildenv-${TARGETPLATFORM},sharing=locked,target=/var/cache/zypp \
   set -ex ; \
-  zypper --non-interactive up ; \
-  zypper --non-interactive install --recommends \
+  zypper --non-interactive --gpg-auto-import-keys refresh ; \
+  zypper --non-interactive --no-gpg-checks up ; \
+  zypper --non-interactive --no-gpg-checks install --recommends \
     -t pattern devel_{C_C++,kernel,rpm_build} ; \
   zypper --non-interactive install \
     post-build-checks \
