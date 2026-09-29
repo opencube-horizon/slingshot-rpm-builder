@@ -111,3 +111,24 @@ RUN --mount=type=cache,target=/var/cache/dnf --mount=type=bind,from=rpms,target=
     /tmp/RPMS/$(uname -m)/cray-libcxi-[0-9]*.rpm \
     /tmp/RPMS/$(uname -m)/cray-libcxi-utils-[0-9]*.rpm \
     /tmp/RPMS/$(uname -m)/libfabric-[0-9]*.rpm
+
+# Stage 5: Development — runtime + devel headers/libraries for building applications
+FROM runtime AS runtime-dev
+
+RUN --mount=type=cache,target=/var/cache/dnf --mount=type=bind,from=rpms,target=/tmp/RPMS \
+  set -ex ; \
+  rpm -ivh --nodeps \
+    /tmp/RPMS/$(uname -m)/cray-libcxi-devel-[0-9]*.rpm \
+    /tmp/RPMS/$(uname -m)/libfabric-devel-[0-9]*.rpm
+
+# Stage 6: Operations — runtime + retry handler, network config, operational tools
+FROM runtime AS ops
+
+RUN --mount=type=cache,target=/var/cache/dnf --mount=type=bind,from=rpms,target=/tmp/RPMS \
+  set -ex ; \
+  dnf -y install \
+    iproute \
+    ; \
+  rpm -ivh --nodeps \
+    /tmp/RPMS/$(uname -m)/cray-libcxi-retry-handler-[0-9]*.rpm \
+    /tmp/RPMS/$(uname -m)/slingshot-network-config-[0-9]*.rpm
