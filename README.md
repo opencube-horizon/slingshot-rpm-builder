@@ -177,6 +177,23 @@ first node context:
 - `Dockerfile.<distro>` / `Dockerfile.middleware.<distro>` — per-distro build definitions
 - `patches/<ver>/common/` and `patches/<ver>/<distro>/` — version- and distro-specific patches (only the needed version is copied in)
 
+## Deployment (Ansible)
+
+`ansible/` deploys the built RPMs onto a host via the `slingshot-host` role
+(drivers, libraries, firmware, network config; SUSE and Rocky). RPMs come from
+`local_dir` (this repo's build output), `image` (OCI images), or an existing
+`repo`. Firmware RPMs are not built here and need to be dropped into
+`shs-firmware/`, copied from the official SHS release (the `cray-hms-firmware`
+and `slingshot-firmware-cassini` RPMs).
+
+```console
+❯ cd ansible && make setup
+❯ make deploy-from-local HOSTS=cn01, ARGS="-u root"
+```
+
+See `ansible/Makefile` for the `deploy-from-{local,images,repo}` targets and
+`ansible/roles/slingshot-host/defaults/main.yml` for role variables.
+
 ## Notes
 
 - This uses the public repositories of the Slingshot Host Software packages.
