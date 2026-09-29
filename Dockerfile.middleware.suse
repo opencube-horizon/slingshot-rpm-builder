@@ -1,43 +1,46 @@
-# Dockerfile.userland.rocky — Layered userland RPMs on top of SHS base packages (Rocky 10.2)
+# Dockerfile.middleware — Layered userland/middleware RPMs on top of SHS base packages
 #
 # Build context: the project directory
-# Additional context: --build-context base-rpms=./RPMS.rocky.${SHS_VER}
+# Additional context: --build-context base-rpms=./RPMS.${SHS_VER}
 #
 # Usage:
-#   docker buildx build -f Dockerfile.userland.rocky \
-#     --build-context base-rpms=./RPMS.rocky.14.0.1 \
+#   docker buildx build -f Dockerfile.middleware \
+#     --build-context base-rpms=./RPMS.14.0.1 \
 #     --build-arg SHS_VER=14.0.1 \
-#     --target rpms --output type=local,dest=./RPMS.userland.rocky.14.0.1 .
+#     --target rpms --output type=local,dest=./RPMS.middleware.14.0.1 .
 
 # Stage 1: Build environment with SHS base RPMs installed
-FROM rockylinux/rockylinux:10.2 AS buildenv
+FROM registry.opensuse.org/opensuse/leap:16.0 AS buildenv
 
-# Enable CRB and EPEL for additional build deps
-RUN dnf -y install epel-release && \
-    dnf config-manager --set-enabled crb && \
-    dnf -y update
+# Core build tools
+# Workaround: openSUSE signing key expired 2026-06-19, disable RPM signature verification
+RUN rpm -e --allmatches gpg-pubkey 2>/dev/null || true ; \
+    echo "%_pkgverify_level none" > /etc/rpm/macros.nosig
 
-# Core build tools + all BuildRequires for userland packages
-RUN --mount=type=cache,target=/var/cache/dnf \
-  dnf -y install \
-    gcc gcc-c++ gcc-gfortran make automake autoconf libtool \
-    rpm-build redhat-rpm-config \
+RUN --mount=type=cache,target=/var/cache/zypp \
+  set -ex ; \
+  zypper --non-interactive --gpg-auto-import-keys refresh ; \
+  zypper --non-interactive --no-gpg-checks up ; \
+  zypper --non-interactive --no-gpg-checks install --recommends \
+    -t pattern devel_{C_C++,rpm_build} ; \
+  zypper --non-interactive --no-gpg-checks install \
     cmake \
     meson \
-    ninja-build \
+    ninja \
+    gcc-fortran \
     boost-devel \
     fuse3-devel \
-    json-c-devel \
-    lz4-devel \
+    libjson-c-devel \
+    liblz4-devel \
     libuuid-devel \
     libyaml-devel \
     openssl-devel \
-    python3-devel \
-    python3-pip \
-    python3-setuptools \
-    python3-Cython \
+    python313-devel \
+    python313-pip \
+    python313-setuptools \
+    python313-Cython \
     hwloc-devel \
-    numactl-devel \
+    libnuma-devel \
     libevent-devel \
     pmix-devel \
     libnl3-devel \
@@ -46,21 +49,21 @@ RUN --mount=type=cache,target=/var/cache/dnf \
     createrepo_c \
     curl \
     nasm \
-    golang \
+    go \
+    go-race \
     scons \
     protobuf-c-devel \
-    capstone-devel \
+    libcapstone-devel \
     libcmocka-devel \
     valgrind-devel \
-    CUnit-devel \
+    cunit-devel \
     pciutils-devel \
     python3-distro \
     python-rpm-macros \
-    Lmod \
+    lua-lmod \
     systemd-rpm-macros \
-    rocky-release \
-    libasan \
-    tar gzip bzip2 xz patch which findutils \
+    distribution-release \
+    libasan8 \
     ;
 
 # Install base SHS RPMs (libfabric with CXI provider) from the pre-built repo
@@ -80,31 +83,31 @@ RUN --mount=type=bind,from=base-rpms,target=/tmp/base-rpms \
 
 WORKDIR /build
 ARG CACHEBUST=1
-COPY Makefile.userland /build/
+COPY Makefile.middleware /build/
 COPY specs/ /build/specs/
 
 # Stage 2: Parallel build stacks — buildkit runs independent FROM stages concurrently.
 # Each stack fetches its own sources and compiles independently.
 
-# Stack 1: argobots + mercury + isa-l + daos-client (~120s)
+# Stack 1: argobots + mercury (~30s)
 FROM buildenv AS stack-mercury
 ARG MAKEOPTS
-RUN make -f Makefile.userland stack-mercury ${MAKEOPTS}
+RUN make -f Makefile.middleware stack-mercury ${MAKEOPTS}
 
 # Stack 2: mpich 4.x + mpi4py-mpich (~200s)
 FROM buildenv AS stack-mpich
 ARG MAKEOPTS
-RUN make -f Makefile.userland stack-mpich ${MAKEOPTS}
+RUN make -f Makefile.middleware stack-mpich ${MAKEOPTS}
 
 # Stack 3: mpich 5.x (~200s)
 FROM buildenv AS stack-mpich5
 ARG MAKEOPTS
-RUN make -f Makefile.userland stack-mpich5 ${MAKEOPTS}
+RUN make -f Makefile.middleware stack-mpich5 ${MAKEOPTS}
 
 # Stack 4: openmpi + mpi4py-openmpi (~300s)
 FROM buildenv AS stack-openmpi
 ARG MAKEOPTS
-RUN make -f Makefile.userland stack-openmpi ${MAKEOPTS}
+RUN make -f Makefile.middleware stack-openmpi ${MAKEOPTS}
 
 # Stage 3: Merge all RPMs and generate repo metadata
 FROM buildenv AS assemble

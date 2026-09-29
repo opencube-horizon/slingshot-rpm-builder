@@ -1,0 +1,342 @@
+# Makefile.shs — Builds the Slingshot Host Software (SHS) driver/library stack
+#                *inside* the build container.
+#
+# Run as: make -f Makefile.shs rpmbuild/RPMS/repodata/repomd.xml
+#         make -f Makefile.shs prepare         # fetch + patch sources
+#         make -f Makefile.shs apply-patches
+#
+# Invoked by Dockerfile.suse / Dockerfile.rocky. The host-side orchestration
+# (docker buildx, container images, repo merging) lives in ./Makefile.
+
+.PHONY: all prepare versions apply-patches check-availabilities checksums
+
+# NOTE: SHS_VER/LUSTRE_VER are the canonical package-set version. The outer
+# ./Makefile passes SHS_VER through as a --build-arg and on the inner `make`
+# command line, so these defaults only apply to standalone invocations here.
+SHS_VER ?= 14.0.1
+LUSTRE_VER := 2.17.57
+
+DISTRO ?= suse
+
+ifneq ($(NO_OVERRIDE),1)
+-include Makefile.shs.d/$(SHS_VER)
+endif
+
+# Handle rename: cassini2-firmware-devel → cassini-firmware-headers
+# Override to cassini2-firmware-devel in Makefile.shs.d/<ver> for old releases
+PKG_firmware_cassini     ?= cassini-firmware-headers
+
+REPO_cassini-headers     := HewlettPackard/shs-cassini-headers
+REPO_sl-driver           := HewlettPackard/ss-link
+REPO_cxi-driver          := HewlettPackard/shs-cxi-driver
+REPO_firmware_cassini    := HewlettPackard/shs-firmware-cassini2-devel
+REPO_slingshot_base_link := HewlettPackard/ss-sbl
+REPO_libcxi              := HewlettPackard/shs-libcxi
+REPO_kfabric             := HewlettPackard/shs-kfabric
+REPO_network-config      := HewlettPackard/shs-network-config
+REPO_libfabric           := HewlettPackard/shs-libfabric
+REPO_utils               := HewlettPackard/shs-utils
+REPO_rxe                 := HewlettPackard/shs-rxe
+REPO_kdreg2              := HewlettPackard/shs-kdreg2
+REPO_firmware-management := HewlettPackard/shs-firmware-management
+REPO_lustre              := lustre/lustre-release
+
+ARCH := $(shell uname -m)
+# or should we use `uname -p`, or `arch`?
+
+# libfabric configure options: disable providers that pull in rdma-core (we only use CXI)
+LIBFABRIC_CONFIGOPTS ?= --disable-verbs --disable-efa --disable-opx --disable-psm3 LDFLAGS=-Wl,--build-id
+
+# TODO: package revisions are currently hardcoded
+
+SHS_COMPONENTS := \
+  firmware_cassini \
+  slingshot_base_link \
+  cassini-headers \
+  sl-driver \
+  cxi-driver \
+  libcxi \
+  kfabric \
+  network-config \
+  utils \
+  rxe \
+  kdreg2 \
+  firmware-management \
+  libfabric
+
+# Set default refs only if not already set
+$(foreach c,$(SHS_COMPONENTS),\
+  $(if $(REF_$(c)),,$(eval REF_$(c) := refs/tags/release/shs-$(SHS_VER)))\
+)
+
+# Lustre has a different default
+ifeq ($(REF_lustre),)
+REF_lustre := refs/tags/$(LUSTRE_VER)
+endif
+
+HASH_SUMS := sha256 sha512
+PKGS := $(addsuffix -rpm,$(SHS_COMPONENTS)) lustre-rpm
+SRC_DIRS := $(addprefix src/,$(SHS_COMPONENTS)) src/lustre
+VERSIONS_DIR := versions
+VER_FILES := $(addsuffix .$(SHS_VER),$(addprefix $(VERSIONS_DIR)/,$(SHS_COMPONENTS)))
+
+VER_SRC_firmware_cassini    := $(PKG_firmware_cassini).spec
+VER_SRC_cassini-headers     := cray-cassini-headers-public.spec
+VER_SRC_sl-driver           := sl-driver.spec
+VER_SRC_slingshot_base_link := cray-slingshot-base-link.spec
+VER_SRC_cxi-driver          := cray-cxi-driver.spec
+VER_SRC_libcxi              := cray-libcxi.spec
+VER_SRC_kfabric             := cray-kfabric.spec
+VER_SRC_network-config      := slingshot-network-config.spec
+VER_SRC_utils               := slingshot-utils.spec
+VER_SRC_rxe                 := cray-rxe-driver.spec
+VER_SRC_kdreg2              := kdreg2.spec
+VER_SRC_firmware-management := slingshot-firmware-management.spec
+VER_SRC_libfabric           := configure.ac
+
+firmware_cassini_ver    = $(shell cat $(VERSIONS_DIR)/firmware_cassini.$(SHS_VER))
+cassini_headers_ver     = $(shell cat $(VERSIONS_DIR)/cassini-headers.$(SHS_VER))
+sl_driver_ver           = $(shell cat $(VERSIONS_DIR)/sl-driver.$(SHS_VER))
+slingshot_base_link_ver = $(shell cat $(VERSIONS_DIR)/slingshot_base_link.$(SHS_VER))
+cxi_driver_ver          = $(shell cat $(VERSIONS_DIR)/cxi-driver.$(SHS_VER))
+libcxi_ver              = $(shell cat $(VERSIONS_DIR)/libcxi.$(SHS_VER))
+kfabric_ver             = $(shell cat $(VERSIONS_DIR)/kfabric.$(SHS_VER))
+network_config_ver      = $(shell cat $(VERSIONS_DIR)/network-config.$(SHS_VER))
+utils_ver               = $(shell cat $(VERSIONS_DIR)/utils.$(SHS_VER))
+rxe_ver                 = $(shell cat $(VERSIONS_DIR)/rxe.$(SHS_VER))
+kdreg2_ver              = $(shell cat $(VERSIONS_DIR)/kdreg2.$(SHS_VER))
+firmware_management_ver = $(shell cat $(VERSIONS_DIR)/firmware-management.$(SHS_VER))
+libfabric_ver           = $(shell cat $(VERSIONS_DIR)/libfabric.$(SHS_VER))
+
+pkg_ver = $(firstword $(subst -, ,$*))
+pkg_rev = $(lastword $(subst -, ,$*))
+
+# Default target: build every SHS RPM and generate repo metadata.
+all: rpmbuild/RPMS/repodata/repomd.xml
+
+versions: $(VER_FILES)
+
+$(VERSIONS_DIR)/%.${SHS_VER}: Makefile.shs
+	@mkdir -p versions
+	@echo "Fetching version for $* from GitHub: $(REPO_$*)@$(REF_$*)" >&2
+	@curl -fsSL "https://raw.githubusercontent.com/$(REPO_$*)/$(REF_$*)/$(VER_SRC_$*)" \
+	  | awk '/^Version:/ {print $$2;}' > "$@"
+
+$(VERSIONS_DIR)/libfabric.${SHS_VER}: Makefile.shs
+	@mkdir -p versions
+	@echo "Fetching version for libfabric from GitHub: $(REPO_libfabric)@$(REF_libfabric)" >&2
+	@curl -fsSL "https://raw.githubusercontent.com/$(REPO_libfabric)/$(REF_libfabric)/$(VER_SRC_libfabric)" \
+	  | ggrep -oP '^AC_INIT[^\d]+\K[^\]]+' > "$@"
+
+prepare: $(SRC_DIRS)
+
+src/%:
+	mkdir -p "$@"
+	curl -L "https://github.com/$(REPO_$(notdir $@))/archive/$(REF_$(notdir $@)).tar.gz" \
+		| tar -xz --strip-components=1 -C "$@"
+	@if [ -d "patches/$(SHS_VER)/common" ]; then \
+		find patches/$(SHS_VER)/common -ipath '$(patsubst src/%,patches/$(SHS_VER)/common/%,$@)/*.patch' \
+			| sort \
+			| xargs -I{} sh -c 'echo "Applying: {}"; patch -d $@ -p1 < "{}"'; \
+	fi
+	@if [ -d "patches/$(SHS_VER)/$(DISTRO)" ]; then \
+		find patches/$(SHS_VER)/$(DISTRO) -ipath '$(patsubst src/%,patches/$(SHS_VER)/$(DISTRO)/%,$@)/*.patch' \
+			| sort \
+			| xargs -I{} sh -c 'echo "Applying ($(DISTRO)): {}"; patch -d $@ -p1 < "{}"'; \
+	fi
+
+apply-patches:
+	@for d in $(SRC_DIRS); do \
+		comp=$$(basename "$$d") ; \
+		if [ -d "patches/$(SHS_VER)/common" ]; then \
+			find patches/$(SHS_VER)/common -ipath "patches/$(SHS_VER)/common/$$comp/*.patch" 2>/dev/null \
+				| sort \
+				| while read p; do echo "Applying: $$p"; patch -d "$$d" -p1 < "$$p"; done; \
+		fi; \
+		if [ -d "patches/$(SHS_VER)/$(DISTRO)" ]; then \
+			find "patches/$(SHS_VER)/$(DISTRO)" -ipath "patches/$(SHS_VER)/$(DISTRO)/$$comp/*.patch" 2>/dev/null \
+				| sort \
+				| while read p; do echo "Applying ($(DISTRO)): $$p"; patch -d "$$d" -p1 < "$$p"; done; \
+		fi; \
+	done
+
+check-availabilities: $(patsubst src/%,check-availability/%,$(SRC_DIRS))
+check-availability/%:
+	@curl -sfIL "https://github.com/$(REPO_$(notdir $@))/archive/$(REF_$(notdir $@)).tar.gz" >/dev/null \
+		&& echo "✅ https://github.com/$(REPO_$(notdir $@))/archive/$(REF_$(notdir $@)).tar.gz" \
+		|| echo "❌ https://github.com/$(REPO_$(notdir $@))/archive/$(REF_$(notdir $@)).tar.gz"
+
+checksums: $(patsubst src/%,checksum/%,$(SRC_DIRS))
+checksum/%: SHELL := /bin/bash
+checksum/%:
+	@command -v pee >/dev/null || { echo "'pee' from moreutils is needed"; exit 1; }
+	@paste \
+	  <(printf '$(subst -,_,$(notdir $@))_%s\n' $(addsuffix ":",$(HASH_SUMS))) \
+	  <(curl -sL "https://github.com/$(REPO_$(notdir $@))/archive/$(REF_$(notdir $@)).tar.gz" | pee $(HASH_SUMS))
+
+firmware_cassini-rpm: src/firmware_cassini
+	# use make call to have firmware_cassini_ver available when starting this rule
+	$(MAKE) -f Makefile.shs rpmbuild/RPMS/noarch/$(PKG_firmware_cassini)-$(firmware_cassini_ver)-1.noarch.rpm
+
+firmware_cassini-install: firmware_cassini-rpm
+	rpm -i "rpmbuild/RPMS/noarch/$(PKG_firmware_cassini)-$(firmware_cassini_ver)-1.noarch.rpm"
+
+rpmbuild/RPMS/noarch/$(PKG_firmware_cassini)-%.noarch.rpm:
+	cd src/firmware_cassini ; chmod +x build-rpm.sh ; ./build-rpm.sh
+	mkdir -p rpmbuild/RPMS/noarch
+	cp src/firmware_cassini/build/rpmbuild/RPMS/noarch/$(PKG_firmware_cassini)-$*.noarch.rpm "$@"
+
+# 'env -i' is required to avoid a failure in rpmbuild when being called via nested make calls
+# LD_PRELOAD must be preserved for the fakeuname shim (intercepts uname(3) in containers)
+ENV_I := env -i PATH="$(PATH)" $${LD_PRELOAD:+LD_PRELOAD=$$LD_PRELOAD}
+
+cassini-headers-rpm: src/cassini-headers
+	$(MAKE) -f Makefile.shs rpmbuild/RPMS/noarch/cray-cassini-headers-user-$(cassini_headers_ver)-0.noarch.rpm
+
+cassini-headers-install: cassini-headers-rpm
+	rpm -i --force \
+		"rpmbuild/RPMS/noarch/cray-cassini-headers-user-$(cassini_headers_ver)-0.noarch.rpm" \
+		"rpmbuild/RPMS/noarch/cray-cassini-csr-defs-$(cassini_headers_ver)-0.noarch.rpm"
+
+rpmbuild/RPMS/noarch/cray-cassini-headers-user-%.noarch.rpm:
+	mkdir -p rpmbuild/SOURCES rpmbuild/RPMS/noarch
+	tar --transform "s,^src/cassini-headers/,cray-cassini-headers-$(pkg_ver)/," -cf "rpmbuild/SOURCES/cray-cassini-headers-$(pkg_ver).tar.gz" src/cassini-headers
+	$(ENV_I) BUILD_METADATA="$(pkg_rev)" rpmbuild --define "_topdir $(CURDIR)/rpmbuild" -ba src/cassini-headers/cray-cassini-headers-public.spec
+
+sl-driver-rpm: src/sl-driver cassini-headers-rpm
+	$(MAKE) -f Makefile.shs "rpmbuild/RPMS/$(ARCH)/sl-driver-$(sl_driver_ver)-0.$(ARCH).rpm"
+
+sl-driver-install: sl-driver-rpm
+	rpm -i --force "rpmbuild/RPMS/$(ARCH)/sl-driver-devel-$(sl_driver_ver)-0.$(ARCH).rpm"
+
+rpmbuild/RPMS/$(ARCH)/sl-driver-%.$(ARCH).rpm:
+	mkdir -p rpmbuild/SOURCES "rpmbuild/RPMS/$(ARCH)"
+	if [ -f src/sl-driver/knl/Makefile ]; then sed -i -e 's|\(-Werror\)|\1 -Wno-error=missing-prototypes|' src/sl-driver/knl/Makefile; fi
+	tar --transform "s,^src/sl-driver/,sl-driver-$(pkg_ver)/," -cf "rpmbuild/SOURCES/sl-driver-$(pkg_ver).tar.gz" src/sl-driver
+	$(ENV_I) BUILD_METADATA="$(pkg_rev)" rpmbuild --define "_topdir $(CURDIR)/rpmbuild" -ba src/sl-driver/sl-driver.spec
+
+slingshot_base_link-rpm: src/slingshot_base_link cassini-headers-install
+	$(MAKE) -f Makefile.shs rpmbuild/RPMS/$(ARCH)/cray-slingshot-base-link-devel-$(slingshot_base_link_ver)-0.$(ARCH).rpm
+
+slingshot_base_link-install: slingshot_base_link-rpm
+	rpm -i --force "rpmbuild/RPMS/$(ARCH)/cray-slingshot-base-link-devel-$(slingshot_base_link_ver)-0.$(ARCH).rpm"
+
+rpmbuild/RPMS/$(ARCH)/cray-slingshot-base-link-devel-%.$(ARCH).rpm:
+	mkdir -p rpmbuild/SOURCES "rpmbuild/RPMS/$(ARCH)"
+	tar --transform "s,^src/slingshot_base_link/,cray-slingshot-base-link-$(pkg_ver)/," -cf "rpmbuild/SOURCES/cray-slingshot-base-link-$(pkg_ver).tar.gz" src/slingshot_base_link
+	$(ENV_I) BUILD_METADATA="$(pkg_rev)" KCFLAGS="-Wno-error=implicit-function-declaration -Wno-error=missing-prototypes" rpmbuild --define "_topdir $(CURDIR)/rpmbuild" -ba src/slingshot_base_link/cray-slingshot-base-link.spec
+
+cxi-driver-rpm: src/cxi-driver cassini-headers-install slingshot_base_link-install sl-driver-install firmware_cassini-install
+	$(MAKE) -f Makefile.shs "rpmbuild/RPMS/$(ARCH)/cray-cxi-driver-devel-$(cxi_driver_ver)-0.$(ARCH).rpm"
+
+cxi-driver-install: cxi-driver-rpm
+	rpm -i --force "rpmbuild/RPMS/$(ARCH)/cray-cxi-driver-devel-$(cxi_driver_ver)-0.$(ARCH).rpm"
+
+rpmbuild/RPMS/$(ARCH)/cray-cxi-driver-devel-%.$(ARCH).rpm:
+	mkdir -p rpmbuild/SOURCES "rpmbuild/RPMS/$(ARCH)"
+	tar --transform "s,^src/cxi-driver/,cray-cxi-driver-$(pkg_ver)/," -cf "rpmbuild/SOURCES/cray-cxi-driver-$(pkg_ver).tar.gz" src/cxi-driver
+	$(ENV_I) BUILD_METADATA="$(pkg_rev)" rpmbuild --define "_topdir $(CURDIR)/rpmbuild" -ba src/cxi-driver/cray-cxi-driver.spec
+
+libcxi-rpm: src/libcxi cassini-headers-install cxi-driver-install firmware_cassini-install
+	$(MAKE) -f Makefile.shs "rpmbuild/RPMS/$(ARCH)/cray-libcxi-$(libcxi_ver)-0.$(ARCH).rpm"
+
+libcxi-install: libcxi-rpm
+	rpm -i --force \
+		"rpmbuild/RPMS/$(ARCH)/cray-libcxi-$(libcxi_ver)-0.$(ARCH).rpm" \
+		"rpmbuild/RPMS/$(ARCH)/cray-libcxi-devel-$(libcxi_ver)-0.$(ARCH).rpm"
+
+rpmbuild/RPMS/$(ARCH)/cray-libcxi-%.$(ARCH).rpm:
+	mkdir -p rpmbuild/SOURCES "rpmbuild/RPMS/$(ARCH)"
+	tar --transform "s,^src/libcxi/,libcxi-$(pkg_ver)/," -cf "rpmbuild/SOURCES/libcxi-$(pkg_ver).tar.gz" src/libcxi
+	$(ENV_I) BUILD_METADATA="$(pkg_rev)" \
+	  rpmbuild \
+	  --define "_topdir $(CURDIR)/rpmbuild" \
+	  -ba src/libcxi/cray-libcxi.spec
+
+kfabric-rpm: src/kfabric libcxi-install cxi-driver-install
+	$(MAKE) -f Makefile.shs "rpmbuild/RPMS/$(ARCH)/cray-kfabric-devel-$(kfabric_ver)-0.$(ARCH).rpm"
+
+kfabric-install: kfabric-rpm
+	rpm -i --force "rpmbuild/RPMS/$(ARCH)/cray-kfabric-devel-$(kfabric_ver)-0.$(ARCH).rpm"
+
+rpmbuild/RPMS/$(ARCH)/cray-kfabric-devel-%.$(ARCH).rpm:
+	mkdir -p rpmbuild/SOURCES "rpmbuild/RPMS/$(ARCH)"
+	tar --transform "s,^src/kfabric/,cray-kfabric-$(pkg_ver)/," -cf "rpmbuild/SOURCES/cray-kfabric-$(pkg_ver).tar.gz" src/kfabric
+	sed -i -e 's|\(KCPPFLAGS\)=\(-I%{_includedir}\)|\1="\2 -Wno-missing-prototypes"|' src/kfabric/cray-kfabric.spec
+	$(ENV_I) BUILD_METADATA="$(pkg_rev)" rpmbuild --define "_topdir $(CURDIR)/rpmbuild" -ba src/kfabric/cray-kfabric.spec
+
+network-config-rpm: src/network-config
+	$(MAKE) -f Makefile.shs "rpmbuild/RPMS/$(ARCH)/slingshot-network-config-$(network_config_ver)-0.$(ARCH).rpm"
+
+rpmbuild/RPMS/$(ARCH)/slingshot-network-config-%.$(ARCH).rpm:
+	mkdir -p rpmbuild/SOURCES "rpmbuild/RPMS/$(ARCH)"
+	tar --transform "s,^src/network-config/,slingshot-network-config-$(pkg_ver)/," -cf "rpmbuild/SOURCES/slingshot-network-config-$(pkg_ver).tar.gz" src/network-config
+	$(ENV_I) BUILD_METADATA="$(pkg_rev)" rpmbuild --define "_topdir $(CURDIR)/rpmbuild" -ba src/network-config/slingshot-network-config.spec
+
+utils-rpm: src/utils
+	$(MAKE) -f Makefile.shs "rpmbuild/RPMS/noarch/slingshot-utils-$(utils_ver)-0.noarch.rpm"
+
+rpmbuild/RPMS/noarch/slingshot-utils-%.noarch.rpm:
+	mkdir -p rpmbuild/SOURCES rpmbuild/RPMS/noarch
+	tar --transform "s,^src/utils/,slingshot-utils-$(pkg_ver)/," -cf "rpmbuild/SOURCES/slingshot-utils-$(pkg_ver).tar.gz" src/utils
+	$(ENV_I) BUILD_METADATA="$(pkg_rev)" rpmbuild --define "_topdir $(CURDIR)/rpmbuild" -ba src/utils/slingshot-utils.spec
+
+rxe-rpm: src/rxe
+	$(MAKE) -f Makefile.shs "rpmbuild/RPMS/$(ARCH)/cray-rxe-driver-devel-$(rxe_ver)-0.$(ARCH).rpm"
+
+rpmbuild/RPMS/$(ARCH)/cray-rxe-driver-devel-%.$(ARCH).rpm:
+	mkdir -p rpmbuild/SOURCES "rpmbuild/RPMS/$(ARCH)"
+	tar --transform "s,^src/rxe/,cray-rxe-driver-$(pkg_ver)/," -cf "rpmbuild/SOURCES/cray-rxe-driver-$(pkg_ver).tar.gz" src/rxe
+	cp src/rxe/kmp_files src/rxe/rxe_versions rpmbuild/SOURCES/ 2>/dev/null || true
+	$(ENV_I) BUILD_METADATA="$(pkg_rev)" rpmbuild --define "_topdir $(CURDIR)/rpmbuild" -ba src/rxe/cray-rxe-driver.spec
+
+kdreg2-rpm: src/kdreg2
+	$(MAKE) -f Makefile.shs "rpmbuild/RPMS/$(ARCH)/kdreg2-devel-$(kdreg2_ver)-0.$(ARCH).rpm"
+
+kdreg2-install: kdreg2-rpm
+	rpm -i --force "rpmbuild/RPMS/$(ARCH)/kdreg2-devel-$(kdreg2_ver)-0.$(ARCH).rpm"
+
+rpmbuild/RPMS/$(ARCH)/kdreg2-devel-%.$(ARCH).rpm:
+	mkdir -p rpmbuild/SOURCES "rpmbuild/RPMS/$(ARCH)"
+	tar --transform "s,^src/kdreg2/,kdreg2-$(pkg_ver)/," -cf "rpmbuild/SOURCES/kdreg2-$(pkg_ver).tar.gz" src/kdreg2
+	$(ENV_I) BUILD_METADATA="$(pkg_rev)" rpmbuild --define "_topdir $(CURDIR)/rpmbuild" -ba src/kdreg2/kdreg2.spec
+
+firmware-management-rpm: src/firmware-management
+	$(MAKE) -f Makefile.shs "rpmbuild/RPMS/noarch/slingshot-firmware-management-$(firmware_management_ver)-0.noarch.rpm"
+
+rpmbuild/RPMS/noarch/slingshot-firmware-management-%.noarch.rpm:
+	mkdir -p rpmbuild/SOURCES rpmbuild/RPMS/noarch
+	tar --transform "s,^src/firmware-management/,slingshot-firmware-management-$(pkg_ver)/," -cf "rpmbuild/SOURCES/slingshot-firmware-management-$(pkg_ver).tar.gz" src/firmware-management
+	$(ENV_I) BUILD_METADATA="$(pkg_rev)" rpmbuild --define "_topdir $(CURDIR)/rpmbuild" -ba src/firmware-management/slingshot-firmware-management.spec
+
+libfabric-rpm: src/libfabric libcxi-install cassini-headers-install kdreg2-install
+	$(MAKE) -f Makefile.shs "rpmbuild/RPMS/$(ARCH)/libfabric-$(libfabric_ver)-1.$(ARCH).rpm"
+
+rpmbuild/RPMS/$(ARCH)/libfabric-%.$(ARCH).rpm:
+	mkdir -p rpmbuild/SOURCES "rpmbuild/RPMS/$(ARCH)"
+	# Align autotools version with our desired version so make dist produces the right tarball name
+	sed -i 's/AC_INIT(\[libfabric\], \[[^]]*\]/AC_INIT([libfabric], [$(pkg_ver)]/' src/libfabric/configure.ac
+	cd src/libfabric && ./autogen.sh && ./configure && make dist
+	cp "src/libfabric/libfabric-$(pkg_ver).tar.bz2" rpmbuild/SOURCES/
+	# Disable LTO: libfabric's inline asm and symbol versioning break with link-time optimization
+	$(ENV_I) rpmbuild --define "_topdir $(CURDIR)/rpmbuild" --define "configopts $(LIBFABRIC_CONFIGOPTS)" --define "_lto_cflags %{nil}" -ba src/libfabric/libfabric.spec
+
+lustre-rpm: SHELL := bash -l
+lustre-rpm: src/lustre kfabric-install
+	mkdir -p rpmbuild/SOURCES "rpmbuild/RPMS/$(ARCH)"
+	cd src/lustre && ./autogen.sh && ./configure --enable-dist && make dist
+	cp src/lustre/rpm/* "src/lustre/lustre-$(LUSTRE_VER).tar.gz" rpmbuild/SOURCES/
+	# The newer compiler chokes on the missing prototypes.
+	sed -i \
+	  -e 's|-Werror|-Werror -Wno-error=missing-prototypes|' \
+	  src/lustre/lustre.spec
+	KCFLAGS="-Wno-error=missing-prototypes" rpmbuild \
+	  --define "_topdir $(CURDIR)/rpmbuild" \
+	  -ba src/lustre/lustre.spec \
+	  --without servers --without l_getsepol \
+	  --define "kver $(or $(notdir $(lastword $(wildcard /lib/modules/*-default))),$(notdir $(firstword $(wildcard /usr/lib/modules/*-default))),$(notdir $(firstword $(wildcard /lib/modules/*))),$(notdir $(firstword $(wildcard /usr/lib/modules/*))),$(notdir $(firstword $(wildcard /usr/src/kernels/*))))" \
+	  --with kfi \
+	  $(if $(filter rocky,$(DISTRO)),--define "debug_package %{nil}" --nodeps)
+
+rpmbuild/RPMS/repodata/repomd.xml: $(PKGS)
+	createrepo rpmbuild/RPMS

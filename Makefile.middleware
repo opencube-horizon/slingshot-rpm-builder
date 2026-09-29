@@ -1,6 +1,6 @@
-# Makefile.userland — Builds userland RPMs inside the Docker container
+# Makefile.middleware — Builds userland/middleware RPMs inside the Docker container
 #
-# Run as: make -f Makefile.userland rpmbuild/RPMS/repodata/repomd.xml
+# Run as: make -f Makefile.middleware rpmbuild/RPMS/repodata/repomd.xml
 #
 # Expects base SHS RPMs (libfabric, libcxi) already installed in the system.
 # Build scope: Layer 1 (argobots, mercury, mpich, mpich5, openmpi)

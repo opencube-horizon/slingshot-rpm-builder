@@ -2,9 +2,12 @@
 FROM registry.opensuse.org/opensuse/leap:16.0 AS fetcher
 RUN zypper --non-interactive install --no-recommends curl tar gzip make
 WORKDIR /build
-COPY Makefile Makefile.overrides.* /build/
 ARG SHS_VER
-RUN make prepare SHS_VER=${SHS_VER} NO_OVERRIDE=0
+# Copy only this version's override so editing another version's override
+# does not invalidate this stage's build cache.
+COPY Makefile.shs /build/
+COPY Makefile.shs.d/${SHS_VER} /build/Makefile.shs.d/${SHS_VER}
+RUN make -f Makefile.shs prepare SHS_VER=${SHS_VER} NO_OVERRIDE=0
 
 FROM scratch AS sources
 COPY --from=fetcher /build/src/ /src/
@@ -64,7 +67,10 @@ RUN --mount=type=cache,id=zypp-buildenv-${TARGETPLATFORM},sharing=locked,target=
     ;
 
 WORKDIR /build
-COPY . /build/
+# Copy only version-agnostic build inputs so editing a version's override or
+# patches does not invalidate this stage's cache.
+COPY fakeuname_preload.c Makefile.shs /build/
+COPY versions /build/versions/
 
 # Fake uname -r so rpmbuild macros see the kernel-devel version, not the host kernel.
 # LD_PRELOAD shim intercepts uname(3); reads /.kernelversion as fallback.
@@ -81,8 +87,11 @@ COPY --from=sources /src/ /build/src/
 ARG MAKEOPTS
 ARG SHS_VER
 ARG DISTRO=suse
-RUN make apply-patches SHS_VER=${SHS_VER} DISTRO=${DISTRO}
-RUN make rpmbuild/RPMS/repodata/repomd.xml SHS_VER=${SHS_VER} DISTRO=${DISTRO} ${MAKEOPTS}
+# Copy only this version's override + patches (cache isolation across versions).
+COPY Makefile.shs.d/${SHS_VER} /build/Makefile.shs.d/${SHS_VER}
+COPY patches/${SHS_VER} /build/patches/${SHS_VER}
+RUN make -f Makefile.shs apply-patches SHS_VER=${SHS_VER} DISTRO=${DISTRO}
+RUN make -f Makefile.shs rpmbuild/RPMS/repodata/repomd.xml SHS_VER=${SHS_VER} DISTRO=${DISTRO} ${MAKEOPTS}
 
 # Stage 3: Collect RPM artifacts into a minimal image
 FROM scratch AS rpms
