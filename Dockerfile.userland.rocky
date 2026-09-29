@@ -1,0 +1,119 @@
+# Dockerfile.userland.rocky — Layered userland RPMs on top of SHS base packages (Rocky 10.2)
+#
+# Build context: the project directory
+# Additional context: --build-context base-rpms=./RPMS.rocky.${SHS_VER}
+#
+# Usage:
+#   docker buildx build -f Dockerfile.userland.rocky \
+#     --build-context base-rpms=./RPMS.rocky.14.0.1 \
+#     --build-arg SHS_VER=14.0.1 \
+#     --target rpms --output type=local,dest=./RPMS.userland.rocky.14.0.1 .
+
+# Stage 1: Build environment with SHS base RPMs installed
+FROM rockylinux/rockylinux:10.2 AS buildenv
+
+# Enable CRB and EPEL for additional build deps
+RUN dnf -y install epel-release && \
+    dnf config-manager --set-enabled crb && \
+    dnf -y update
+
+# Core build tools + all BuildRequires for userland packages
+RUN --mount=type=cache,target=/var/cache/dnf \
+  dnf -y install \
+    gcc gcc-c++ gcc-gfortran make automake autoconf libtool \
+    rpm-build redhat-rpm-config \
+    cmake \
+    meson \
+    ninja-build \
+    boost-devel \
+    fuse3-devel \
+    json-c-devel \
+    lz4-devel \
+    libuuid-devel \
+    libyaml-devel \
+    openssl-devel \
+    python3-devel \
+    python3-pip \
+    python3-setuptools \
+    python3-Cython \
+    hwloc-devel \
+    numactl-devel \
+    libevent-devel \
+    pmix-devel \
+    libnl3-devel \
+    libcurl-devel \
+    libselinux-devel \
+    createrepo_c \
+    curl \
+    nasm \
+    golang \
+    scons \
+    protobuf-c-devel \
+    capstone-devel \
+    libcmocka-devel \
+    valgrind-devel \
+    CUnit-devel \
+    pciutils-devel \
+    python3-distro \
+    python-rpm-macros \
+    Lmod \
+    systemd-rpm-macros \
+    rocky-release \
+    libasan \
+    tar gzip bzip2 xz patch which findutils \
+    ;
+
+# Install base SHS RPMs (libfabric with CXI provider) from the pre-built repo
+# Note: userland packages only need libfabric-devel (CXI is compiled into libfabric)
+# libfabric/libcxi link against libnl3 and libcurl — install them for transitive linking
+RUN --mount=type=bind,from=base-rpms,target=/tmp/base-rpms \
+  set -ex ; \
+  rpm -ivh --nodeps \
+    /tmp/base-rpms/$(uname -m)/libfabric-[0-9]*.rpm \
+    /tmp/base-rpms/$(uname -m)/libfabric-devel-[0-9]*.rpm \
+    /tmp/base-rpms/$(uname -m)/cray-libcxi-[0-9]*.rpm \
+    /tmp/base-rpms/$(uname -m)/cray-libcxi-devel-[0-9]*.rpm \
+    /tmp/base-rpms/noarch/cassini-firmware-headers-*.rpm \
+    /tmp/base-rpms/noarch/cray-cassini-headers-user-*.rpm \
+    /tmp/base-rpms/$(uname -m)/cray-cxi-driver-devel-*.rpm \
+    ;
+
+WORKDIR /build
+ARG CACHEBUST=1
+COPY Makefile.userland /build/
+COPY specs/ /build/specs/
+
+# Stage 2: Parallel build stacks — buildkit runs independent FROM stages concurrently.
+# Each stack fetches its own sources and compiles independently.
+
+# Stack 1: argobots + mercury + isa-l + daos-client (~120s)
+FROM buildenv AS stack-mercury
+ARG MAKEOPTS
+RUN make -f Makefile.userland stack-mercury ${MAKEOPTS}
+
+# Stack 2: mpich 4.x + mpi4py-mpich (~200s)
+FROM buildenv AS stack-mpich
+ARG MAKEOPTS
+RUN make -f Makefile.userland stack-mpich ${MAKEOPTS}
+
+# Stack 3: mpich 5.x (~200s)
+FROM buildenv AS stack-mpich5
+ARG MAKEOPTS
+RUN make -f Makefile.userland stack-mpich5 ${MAKEOPTS}
+
+# Stack 4: openmpi + mpi4py-openmpi (~300s)
+FROM buildenv AS stack-openmpi
+ARG MAKEOPTS
+RUN make -f Makefile.userland stack-openmpi ${MAKEOPTS}
+
+# Stage 3: Merge all RPMs and generate repo metadata
+FROM buildenv AS assemble
+COPY --from=stack-mercury /build/rpmbuild/RPMS/ /build/rpmbuild/RPMS/
+COPY --from=stack-mpich /build/rpmbuild/RPMS/ /build/rpmbuild/RPMS/
+COPY --from=stack-mpich5 /build/rpmbuild/RPMS/ /build/rpmbuild/RPMS/
+COPY --from=stack-openmpi /build/rpmbuild/RPMS/ /build/rpmbuild/RPMS/
+RUN createrepo /build/rpmbuild/RPMS
+
+# Stage 4: Collect RPM artifacts into a minimal image
+FROM scratch AS rpms
+COPY --from=assemble /build/rpmbuild/RPMS/ /

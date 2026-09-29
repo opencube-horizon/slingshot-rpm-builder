@@ -1,0 +1,11 @@
+--- a/setup_rxe.sh	2026-08-10 22:05:50
++++ b/setup_rxe.sh	2026-08-10 22:05:50
+@@ -78,7 +78,7 @@
+     compatibility_files="${compatibility_files}"
+ elif [[ "${RXE_TARGET}" = "RXE_DEVEL" ]]; then
+     export QUILT_SERIES=RXE_DEVEL.series
+-    compatibility_files=""
++    compatibility_files="devel.series"
+ else
+     cleanup_and_fail "No patch series found for target ${RXE_TARGET}"
+ fi

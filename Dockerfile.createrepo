@@ -1,0 +1,18 @@
+# Minimal image for running createrepo_c without bind-mounts.
+# Usage: pass the RPM directory as build context, extract repodata via buildx.
+#
+#   docker buildx build -f Dockerfile.createrepo \
+#     --build-arg BASE_IMAGE=registry.opensuse.org/opensuse/leap:16.0 \
+#     --build-arg INSTALL_CMD="zypper --non-interactive install createrepo_c" \
+#     --output type=local,dest=./RPMS \
+#     ./RPMS
+
+ARG BASE_IMAGE=registry.opensuse.org/opensuse/leap:16.0
+FROM ${BASE_IMAGE} AS createrepo
+ARG INSTALL_CMD="zypper --non-interactive install createrepo_c"
+RUN ${INSTALL_CMD} >/dev/null 2>&1
+COPY . /RPMS
+RUN rm -rf /RPMS/repodata && createrepo /RPMS
+
+FROM scratch
+COPY --from=createrepo /RPMS /

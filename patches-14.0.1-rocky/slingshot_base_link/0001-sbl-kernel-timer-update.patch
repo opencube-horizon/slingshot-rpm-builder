@@ -1,0 +1,78 @@
+diff -Naurb slingshot_base_link.orig/sbl_fec.c slingshot_base_link/sbl_fec.c
+--- slingshot_base_link.orig/sbl_fec.c	2025-09-22 15:34:46
++++ slingshot_base_link/sbl_fec.c	2025-09-22 15:36:28
+@@ -696,7 +696,7 @@
+ {
+ 	int port_num;
+ 	struct sbl_link *link;
+-	struct fec_data *fec_data = from_timer(fec_data, timer, fec_timer);
++	struct fec_data *fec_data = timer_container_of(fec_data, timer, fec_timer);
+ 	struct sbl_inst *sbl = fec_data->sbl;
+ 
+ 	port_num = fec_data->port_num;
+diff -Naurb slingshot_base_link.orig/sbl_inst.c slingshot_base_link/sbl_inst.c
+--- slingshot_base_link.orig/sbl_inst.c	2025-09-22 15:34:46
++++ slingshot_base_link/sbl_inst.c	2025-09-22 15:36:28
+@@ -298,7 +298,7 @@
+ 		link = sbl->link + i;
+ 
+ 		cancel_work_sync(&link->fec_data->fec_timer_work);
+-		del_timer_sync(&link->fec_data->fec_timer);
++		timer_delete_sync(&link->fec_data->fec_timer);
+ 		kfree(link->fec_data->fec_prmts->fec_rates);
+ 		link->fec_data->fec_prmts->fec_rates = NULL;
+ 		kfree(link->fec_data->fec_prmts);
+diff -Naurb slingshot_base_link.orig/sbl_link.c slingshot_base_link/sbl_link.c
+--- slingshot_base_link.orig/sbl_link.c	2025-09-22 15:34:46
++++ slingshot_base_link/sbl_link.c	2025-09-22 15:36:28
+@@ -491,10 +491,10 @@
+ 	spin_lock(&link->lock);
+ 	link->start_cancelled = true;
+ 	spin_unlock(&link->lock);
+-	rtn = del_timer_sync(&fec_data->fec_timer);
++	rtn = timer_delete_sync(&fec_data->fec_timer);
+ 
+ 	if (rtn < 0)
+-		sbl_dev_warn(sbl->dev, "bl %d: del_timer_sync failed [%d]", port_num, rtn);
++		sbl_dev_warn(sbl->dev, "bl %d: timer_delete_sync failed [%d]", port_num, rtn);
+ 
+ 	return 0;
+ }
+@@ -581,10 +581,10 @@
+ 		goto out;
+ 	}
+ 
+-	rtn = del_timer_sync(&fec_data->fec_timer);
++	rtn = timer_delete_sync(&fec_data->fec_timer);
+ 
+ 	if (rtn < 0)
+-		sbl_dev_warn(sbl->dev, "bl %d: del_timer_sync failed [%d]", port_num, rtn);
++		sbl_dev_warn(sbl->dev, "bl %d: timer_delete_sync failed [%d]", port_num, rtn);
+ out:
+ 	spin_lock(&link->lock);
+ 	if (err)
+@@ -648,10 +648,10 @@
+ 	if (err)
+ 		sbl_dev_warn(sbl->dev, "bl %d: reset: pcs_link_down failed [%d]", port_num, err);
+ 
+-	rtn = del_timer_sync(&fec_data->fec_timer);
++	rtn = timer_delete_sync(&fec_data->fec_timer);
+ 
+ 	if (rtn < 0)
+-		sbl_dev_warn(sbl->dev, "bl %d: del_timer_sync failed [%d]", port_num, rtn);
++		sbl_dev_warn(sbl->dev, "bl %d: timer_delete_sync failed [%d]", port_num, rtn);
+ 
+ 	link->blstate = SBL_BASE_LINK_STATUS_UNCONFIGURED;
+ 	link->blerr = 0;
+diff -Naurb slingshot_base_link.orig/sbl_pml.c slingshot_base_link/sbl_pml.c
+--- slingshot_base_link.orig/sbl_pml.c	2025-09-22 15:34:46
++++ slingshot_base_link/sbl_pml.c	2025-09-22 15:36:28
+@@ -550,7 +550,7 @@
+ 	u32 elapsed = jiffies_to_msecs(jiffies - link->pml_recovery.init_jiffies);
+ 	unsigned long irq_flags;
+ 
+-	del_timer_sync(&link->pml_recovery.timer);
++	timer_delete_sync(&link->pml_recovery.timer);
+ 	spin_lock_irqsave(&link->fec_discard_lock, irq_flags);
+ 	link->fec_discard_time = jiffies;
+ 	link->fec_discard_type = SBL_FEC_DISCARD_TYPE_PML_REC_END;

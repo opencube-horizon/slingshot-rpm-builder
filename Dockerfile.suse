@@ -1,10 +1,20 @@
+# Stage 0: Fetch and unpack unmodified upstream sources (cached by version/refs)
+FROM registry.opensuse.org/opensuse/leap:16.0 AS fetcher
+RUN zypper --non-interactive install --no-recommends curl tar gzip make
+WORKDIR /build
+COPY Makefile Makefile.overrides.* /build/
+ARG SHS_VER
+RUN make prepare SHS_VER=${SHS_VER} NO_OVERRIDE=0
+
+FROM scratch AS sources
+COPY --from=fetcher /build/src/ /src/
+
 # Stage 1: Build environment (tools and sources, no build execution)
 FROM registry.opensuse.org/opensuse/leap:16.0 AS buildenv
 
 # BuildKit sets TARGETPLATFORM (for example linux/amd64 or linux/arm64); use it to isolate zypper caches per architecture.
 ARG TARGETPLATFORM
 
-# post-build-checks: required to get the uname hack script
 # gcc13: libcxi is broken with gcc15
 # kernel-default, kernel-64kb: required to get the vmlinuz image and the kernel modules
 #   kernel-64kb only exists on aarch64 (64KB page size flavor)
@@ -20,7 +30,6 @@ RUN --mount=type=cache,id=zypp-buildenv-${TARGETPLATFORM},sharing=locked,target=
   zypper --non-interactive --no-gpg-checks install --recommends \
     -t pattern devel_{C_C++,kernel,rpm_build} ; \
   zypper --non-interactive install \
-    post-build-checks \
     gcc13 \
     kernel-default \
     $(if [ "$(uname -m)" = aarch64 ]; then echo kernel-64kb kernel-64kb-devel; fi) \
@@ -41,8 +50,6 @@ RUN --mount=type=cache,id=zypp-buildenv-${TARGETPLATFORM},sharing=locked,target=
     ; \
   mpi-selector --verbose --system --set openmpi4
 
-RUN /usr/lib/build/finalize-system/11-hack_uname_version_to_kernel_version
-
 # work around https://bugzilla.opensuse.org/show_bug.cgi?id=1238724 until the fix is pushed out
 RUN rm /etc/rpm/macros.leap
 
@@ -59,12 +66,23 @@ RUN --mount=type=cache,id=zypp-buildenv-${TARGETPLATFORM},sharing=locked,target=
 WORKDIR /build
 COPY . /build/
 
+# Fake uname -r so rpmbuild macros see the kernel-devel version, not the host kernel.
+# LD_PRELOAD shim intercepts uname(3); reads /.kernelversion as fallback.
+RUN set -ex ; \
+  gcc -shared -fPIC -o /usr/local/lib/fakeuname.so fakeuname_preload.c -ldl ; \
+  KVER=$(ls /lib/modules/ 2>/dev/null | head -1 || ls /usr/lib/modules/ 2>/dev/null | head -1) ; \
+  echo "$KVER" > /.kernelversion
+ENV LD_PRELOAD=/usr/local/lib/fakeuname.so
+
 # Stage 2: Execute the RPM build
 FROM buildenv AS builder
+COPY --from=sources /src/ /build/src/
 
 ARG MAKEOPTS
 ARG SHS_VER
-RUN make rpmbuild/RPMS/repodata/repomd.xml SHS_VER=${SHS_VER} ${MAKEOPTS}
+ARG DISTRO=suse
+RUN make apply-patches SHS_VER=${SHS_VER} DISTRO=${DISTRO}
+RUN make rpmbuild/RPMS/repodata/repomd.xml SHS_VER=${SHS_VER} DISTRO=${DISTRO} ${MAKEOPTS}
 
 # Stage 3: Collect RPM artifacts into a minimal image
 FROM scratch AS rpms

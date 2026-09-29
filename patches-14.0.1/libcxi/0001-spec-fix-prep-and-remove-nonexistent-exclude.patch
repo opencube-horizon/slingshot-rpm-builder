@@ -1,0 +1,23 @@
+--- a/cray-libcxi.spec
++++ b/cray-libcxi.spec
+@@ -103,11 +103,7 @@
+ Dracut initramfs support for CXI software stack
+ 
+ %prep
+-%if 0%{?rhel} == 10
+-%setup
+-%else
+-%setup -n libcxi-%{version}
+-%endif
++%autosetup -n libcxi-%{version}
+ 
+ %build
+ ./autogen.sh
+@@ -145,7 +141,6 @@
+ %exclude %{_bindir}/cxi_udp_gen
+ %exclude %{_bindir}/test_map_csr
+ %exclude %{_bindir}/test_write_csr
+-%exclude %{_mandir}/man1/cxi_udp_gen.1
+ 
+ %files retry-handler
+ %{_bindir}/cxi_rh

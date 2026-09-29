@@ -1,0 +1,24 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Tiziano=20M=C3=BCller?= <tiziano.mueller@hpe.com>
+Date: Sun, 10 Aug 2026 17:00:00 +0200
+Subject: [PATCH] kmp_files: remove flavor suffix for EL kernels
+
+On EL-based distributions, kernel versions do not include a flavor
+suffix (no -default, -preempt, etc.). The modules_install target
+places modules at /lib/modules/KVER/extra/, so the kmp_files listing
+must match without appending -%1 (flavor).
+
+Signed-off-by: Tiziano Mueller <tiziano.mueller@hpe.com>
+---
+ kmp_files | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/kmp_files b/kmp_files
+index 1234567..abcdefg 100644
+--- a/kmp_files
++++ b/kmp_files
+@@ -1,3 +1,3 @@
+ %defattr (-,root,root)
+-/lib/modules/%2-%1
++/usr/lib/modules/%2
+ /usr/bin/rxe_init.sh

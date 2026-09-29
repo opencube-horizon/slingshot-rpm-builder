@@ -1,0 +1,21 @@
+--- a/cray-rxe-driver.spec	2026-08-10 18:11:49
++++ b/cray-rxe-driver.spec	2026-08-10 18:12:16
+@@ -68,7 +68,7 @@
+     cd $PWD/obj/$flavor/
+     VER_STR=%{version} ./setup_rxe.sh
+     cd $TOP
+-    make -C %{kernel_source $flavor} modules M=$PWD/obj/$flavor/rxe %{?_smp_mflags}
++    make -C %{kernel_source $flavor} modules M=$PWD/obj/$flavor/rxe CONFIG_RDMA_RXE=m %{?_smp_mflags}
+ done
+ 
+ 
+@@ -76,7 +76,8 @@
+ export INSTALL_MOD_PATH=$RPM_BUILD_ROOT
+ export INSTALL_MOD_DIR=%kernel_module_package_moddir %{name}
+ for flavor in %flavors_to_build; do
+-    make -C %{kernel_source $flavor} modules_install M=$PWD/obj/$flavor/rxe
++    KVER=$(basename $(readlink -f %{kernel_source $flavor}))
++    install -D -m 644 $PWD/obj/$flavor/rxe/rdma_rxe.ko $RPM_BUILD_ROOT/usr/lib/modules/$KVER/extra/rdma_rxe.ko
+     install -D $PWD/obj/$flavor/rxe/Module.symvers $RPM_BUILD_ROOT/%{prefix}/src/rxe/$flavor/Module.symvers
+     mkdir -p $RPM_BUILD_ROOT/usr/bin
+     install -D $PWD/source/scripts/rxe_init.sh -m0764 $RPM_BUILD_ROOT/usr/bin

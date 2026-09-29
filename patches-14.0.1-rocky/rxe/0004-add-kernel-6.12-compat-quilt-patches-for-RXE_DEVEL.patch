@@ -1,0 +1,84 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Tiziano=20M=C3=BCller?= <tiziano.mueller@hpe.com>
+Date: Wed, 2 Apr 2026 12:00:00 +0200
+Subject: [PATCH] Add kernel 6.12 compatibility quilt patches for RXE_DEVEL
+ target
+
+Add compatibility patches for building rxe-6.13 on kernel 6.12+:
+
+- fix_from_timer: Replace from_timer() with timer_container_of() in
+  rxe_comp.c and rxe_req.c (from_timer was removed in kernel 6.12).
+
+- fix_reg_user_mr: Add the struct ib_dmah *dmah parameter to
+  rxe_reg_user_mr() to match the kernel 6.12 ib_device_ops signature.
+
+Also add devel.series to wire the compatibility patches into the quilt
+series.
+---
+ patches/compatibility/devel.series               |  2 ++
+ patches/compatibility/devel/fix_from_timer.patch  | 22 ++++++++++++++++++++++
+ patches/compatibility/devel/fix_reg_user_mr.patch | 13 +++++++++++++
+ 3 files changed, 37 insertions(+)
+ create mode 100644 patches/compatibility/devel.series
+ create mode 100644 patches/compatibility/devel/fix_from_timer.patch
+ create mode 100644 patches/compatibility/devel/fix_reg_user_mr.patch
+
+diff --git a/patches/compatibility/devel.series b/patches/compatibility/devel.series
+new file mode 100644
+index 0000000..a1b2c3d
+--- /dev/null
++++ b/patches/compatibility/devel.series
+@@ -0,0 +1,2 @@
++compatibility/devel/fix_from_timer.patch -p1
++compatibility/devel/fix_reg_user_mr.patch -p1
+diff --git a/patches/compatibility/devel/fix_from_timer.patch b/patches/compatibility/devel/fix_from_timer.patch
+new file mode 100644
+index 0000000..c4d5e6f
+--- /dev/null
++++ b/patches/compatibility/devel/fix_from_timer.patch
+@@ -0,0 +1,26 @@
++Replace from_timer() with timer_container_of() for kernel 6.12+.
++from_timer() was removed in favor of timer_container_of() which
++has the same signature.
++
++--- a/rxe/rxe_comp.c
+++++ b/rxe/rxe_comp.c
++@@ -114,7 +114,7 @@
++ 
++ void retransmit_timer(struct timer_list *t)
++ {
++-	struct rxe_qp *qp = from_timer(qp, t, retrans_timer);
+++	struct rxe_qp *qp = timer_container_of(qp, t, retrans_timer);
++ 	unsigned long flags;
++ 
++ 	rxe_dbg_qp(qp, "retransmit timer fired\n");
++--- a/rxe/rxe_req.c
+++++ b/rxe/rxe_req.c
++@@ -122,7 +122,7 @@
++ 
++ void rnr_nak_timer(struct timer_list *t)
++ {
++-	struct rxe_qp *qp = from_timer(qp, t, rnr_nak_timer);
+++	struct rxe_qp *qp = timer_container_of(qp, t, rnr_nak_timer);
++ 	unsigned long flags;
++ 
++ 	rxe_dbg_qp(qp, "nak timer fired\n");
+diff --git a/patches/compatibility/devel/fix_reg_user_mr.patch b/patches/compatibility/devel/fix_reg_user_mr.patch
+new file mode 100644
+index 0000000..d5e6f7a
+--- /dev/null
++++ b/patches/compatibility/devel/fix_reg_user_mr.patch
+@@ -0,0 +1,13 @@
++Add struct ib_dmah *dmah parameter to rxe_reg_user_mr() to match
++the kernel 6.12 ib_device_ops.reg_user_mr signature change.
++
++--- a/rxe/rxe_verbs.c
+++++ b/rxe/rxe_verbs.c
++@@ -1259,6 +1259,7 @@
++ 
++ static struct ib_mr *rxe_reg_user_mr(struct ib_pd *ibpd, u64 start,
++ 				     u64 length, u64 iova, int access,
+++				     struct ib_dmah *dmah,
++ 				     struct ib_udata *udata)
++ {
++ 	struct rxe_dev *rxe = to_rdev(ibpd->device);

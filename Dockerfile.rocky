@@ -1,0 +1,107 @@
+# Stage 1: Build environment (tools and sources, no build execution)
+FROM rockylinux/rockylinux:10.2 AS buildenv
+
+# Enable CRB (CodeReady Builder) and EPEL for additional build deps
+RUN dnf -y install epel-release && \
+    dnf config-manager --set-enabled crb && \
+    dnf -y update
+
+# kernel-devel: required for kernel module builds (cxi-driver, kfabric, rxe, sl-driver, sbl, lustre)
+# fuse-devel..systemd-devel: required to build libcxi
+# libcurl-devel..json-c-devel: required to build libfabric with cxi provider
+# pandoc: required for kfabric
+# quilt: required for cray-rxe-driver
+# Note: openmpi-devel needed for lustre MPI support
+RUN --mount=type=cache,target=/var/cache/dnf \
+  dnf -y install \
+    gcc gcc-c++ make automake autoconf libtool \
+    rpm-build redhat-rpm-config \
+    kernel-devel kernel-rpm-macros elfutils-libelf-devel \
+    fuse-devel \
+    libconfig-devel \
+    libnl3-devel \
+    numactl-devel \
+    lm_sensors-devel \
+    libuv-devel \
+    libyaml-devel \
+    systemd-devel \
+    libcurl-devel \
+    json-c-devel \
+    pandoc \
+    quilt \
+    libmount-devel \
+    createrepo_c \
+    curl \
+    tar \
+    gzip \
+    bzip2 \
+    xz \
+    patch \
+    perl \
+    m4 \
+    which \
+    findutils \
+    openmpi-devel \
+    ;
+
+# kernel-devel on Rocky 10 installs to /usr/src/kernels/ but creates no symlinks
+# in /lib/modules/ or /usr/lib/modules/.  Lustre (and some other specs) expect
+# /lib/modules/$kver/{source,build} to point to the kernel source tree.
+RUN KVER=$(ls /usr/src/kernels/ | head -1) && \
+    mkdir -p /usr/lib/modules/"$KVER" && \
+    ln -sf /usr/src/kernels/"$KVER" /usr/lib/modules/"$KVER"/source && \
+    ln -sf /usr/src/kernels/"$KVER" /usr/lib/modules/"$KVER"/build
+
+# Suppress %{dist} tag (.el10) so RPM filenames match the Makefile expectations
+# (and stay consistent with the SUSE build naming convention)
+# Also disable debugsource packages and allow empty file manifests
+# (header-only packages produce empty debugsourcefiles.list, EL10 errors on these)
+# Place in /usr/lib/rpm/macros.d/ (compiled-in, always read even with env -i)
+# "zz" prefix ensures alphabetic ordering after macros.debuginfo
+RUN printf '%s\n' \
+      "%dist %{nil}" \
+      "%_debugsource_packages 0" \
+      "%_debuginfo_subpackages 0" \
+      "%_empty_manifest_terminate_build 0" \
+      > /usr/lib/rpm/macros.d/macros.zz-shs-build && \
+    cp /usr/lib/rpm/macros.d/macros.zz-shs-build /root/.rpmmacros
+
+WORKDIR /build
+COPY . /build/
+
+# Fake uname -r so rpmbuild/kmodtool see the kernel-devel version, not the host kernel.
+# LD_PRELOAD shim intercepts uname(3); reads /.kernelversion as fallback.
+RUN set -ex ; \
+  gcc -shared -fPIC -o /usr/local/lib/fakeuname.so fakeuname_preload.c -ldl ; \
+  KVER=$(ls /usr/src/kernels/ 2>/dev/null | head -1) ; \
+  echo "$KVER" > /.kernelversion
+ENV LD_PRELOAD=/usr/local/lib/fakeuname.so
+
+# Stage 2: Execute the RPM build
+FROM buildenv AS builder
+
+ARG MAKEOPTS
+ARG SHS_VER
+ARG DISTRO=rocky
+RUN make rpmbuild/RPMS/repodata/repomd.xml SHS_VER=${SHS_VER} DISTRO=${DISTRO} ${MAKEOPTS}
+
+# Stage 3: Collect RPM artifacts into a minimal image
+FROM scratch AS rpms
+COPY --from=builder /build/rpmbuild/RPMS/ /
+
+# Stage 4: Runtime container with userspace Slingshot libraries
+FROM rockylinux/rockylinux:10.2 AS runtime
+
+RUN --mount=type=cache,target=/var/cache/dnf --mount=type=bind,from=rpms,target=/tmp/RPMS \
+  set -ex ; \
+  dnf -y install \
+    hwloc \
+    kmod \
+    lldpad \
+    jq \
+    iputils \
+    ; \
+  rpm -ivh --nodeps \
+    /tmp/RPMS/$(uname -m)/cray-libcxi-[0-9]*.rpm \
+    /tmp/RPMS/$(uname -m)/cray-libcxi-utils-[0-9]*.rpm \
+    /tmp/RPMS/$(uname -m)/libfabric-[0-9]*.rpm
