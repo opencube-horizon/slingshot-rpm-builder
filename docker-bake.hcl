@@ -30,8 +30,10 @@ variable "DISTROS" {
   default = ["suse", "rocky"]
 }
 
+# Comma-separated so it can be overridden from a plain env var / make variable
+# (bake env overrides match by name); split() turns it into the list bake wants.
 variable "PLATFORMS" {
-  default = ["linux/amd64", "linux/arm64"]
+  default = "linux/amd64,linux/arm64"
 }
 
 # Container image publishing knobs (mirror the Makefile). With neither PUSH nor
@@ -66,7 +68,7 @@ target "shs" {
   dockerfile = "Dockerfile.${distro}"
   context    = "."
   target     = "rpms"
-  platforms  = PLATFORMS
+  platforms  = split(",", PLATFORMS)
   args = {
     SHS_VER = SHS_VER
     DISTRO  = distro
@@ -85,7 +87,7 @@ target "middleware" {
   dockerfile = "Dockerfile.middleware.${distro}"
   context    = "."
   target     = "rpms"
-  platforms  = PLATFORMS
+  platforms  = split(",", PLATFORMS)
   contexts = {
     base-rpms = "target:shs-${distro}"
   }
@@ -100,7 +102,7 @@ target "middleware" {
 # stage in-graph, so no context wiring is needed. PUSH/LOAD pick the export.
 target "_container" {
   context    = "."
-  platforms  = PLATFORMS
+  platforms  = split(",", PLATFORMS)
   provenance = false
   output     = [PUSH ? "type=registry" : (LOAD ? "type=docker" : "type=cacheonly")]
 }
