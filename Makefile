@@ -27,6 +27,11 @@ LOAD := false
 
 DOCKEROPTS :=
 
+# Select a specific buildx builder (e.g. a multi-node native multi-arch rig).
+# Without it, bake uses the active builder, which may satisfy other arches via
+# slow QEMU emulation instead of a native remote node.
+BUILDER ?=
+
 DOCKERFILE            = Dockerfile.$(DISTRO)
 DOCKERFILE_MIDDLEWARE = Dockerfile.middleware.$(DISTRO)
 RPMS_SHS              = RPMS.$(DISTRO).$(SHS_VER)
@@ -36,7 +41,7 @@ CREATEREPO_INSTALL    = zypper --non-interactive install createrepo_c
 
 BAKE = SHS_VER=$(SHS_VER) PLATFORMS=$(PLATFORM) \
        REGISTRY_AND_PROJECT=$(REGISTRY_AND_PROJECT) PUSH=$(PUSH) LOAD=$(LOAD) \
-       docker buildx bake $(DOCKEROPTS)
+       docker buildx bake $(if $(BUILDER),--builder $(BUILDER),) $(DOCKEROPTS)
 
 all:
 	$(BAKE) shs middleware
@@ -72,7 +77,7 @@ shs-local: shs
 	  rm -rf "$$d"/repodata ; \
 	  cp -a "$$d"/* $(RPMS_SHS).local/ 2>/dev/null || true ; \
 	done
-	docker buildx build -f Dockerfile.createrepo \
+	docker buildx build $(if $(BUILDER),--builder $(BUILDER),) -f Dockerfile.createrepo \
 		--platform linux/amd64 \
 		--build-arg BASE_IMAGE=$(CREATEREPO_IMAGE) \
 		--build-arg INSTALL_CMD="$(CREATEREPO_INSTALL)" \
@@ -89,7 +94,7 @@ middleware-local: middleware
 	  rm -rf "$$d"/repodata ; \
 	  cp -a "$$d"/* $(RPMS_MIDDLEWARE).local/ 2>/dev/null || true ; \
 	done
-	docker buildx build -f Dockerfile.createrepo \
+	docker buildx build $(if $(BUILDER),--builder $(BUILDER),) -f Dockerfile.createrepo \
 		--platform linux/amd64 \
 		--build-arg BASE_IMAGE=$(CREATEREPO_IMAGE) \
 		--build-arg INSTALL_CMD="$(CREATEREPO_INSTALL)" \
@@ -101,7 +106,7 @@ middleware-local: middleware
 # Interactive build-env shells. Not driven by bake (bake cannot `docker run`);
 # single-arch host build, so the base-rpms context is a flat tree.
 interactive:
-	docker buildx build -f $(DOCKERFILE) --load --target buildenv \
+	docker buildx build $(if $(BUILDER),--builder $(BUILDER),) -f $(DOCKERFILE) --load --target buildenv \
 		--build-arg SHS_VER=$(SHS_VER) \
 		-t $(REGISTRY_AND_PROJECT)slingshot-container-builder \
 		.
@@ -111,7 +116,7 @@ interactive:
 
 middleware-interactive:
 	$(MAKE) shs DISTRO=$(DISTRO) PLATFORM=linux/amd64
-	docker buildx build -f $(DOCKERFILE_MIDDLEWARE) --load --target buildenv \
+	docker buildx build $(if $(BUILDER),--builder $(BUILDER),) -f $(DOCKERFILE_MIDDLEWARE) --load --target buildenv \
 		--build-context base-rpms=./$(RPMS_SHS) \
 		--build-arg SHS_VER=$(SHS_VER) \
 		-t slingshot-middleware-builder \
@@ -148,6 +153,7 @@ help:
 	@echo "Slingshot RPM builder — common targets (<distro> = $(DISTROS)):"
 	@echo ""
 	@echo "  Multi-arch by default; single arch via PLATFORM=linux/amd64."
+	@echo "  Native multi-arch via a builder rig: BUILDER=<name> (e.g. multiarch)."
 	@echo ""
 	@echo "  SHS stack:"
 	@echo "    shs-<distro>               build SHS RPMs        -> RPMS.<distro>.$(SHS_VER)/"
