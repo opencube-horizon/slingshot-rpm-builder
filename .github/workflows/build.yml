@@ -30,9 +30,6 @@ jobs:
       fail-fast: false
       matrix:
         distro: [suse, rocky]
-    # Rocky only supports SHS 14.0.1; skip it for any other dispatched version
-    # (on push there is no input, so inputs.shs_ver is empty and rocky runs).
-    if: ${{ matrix.distro != 'rocky' || inputs.shs_ver == '' || inputs.shs_ver == '14.0.1' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -56,6 +53,9 @@ jobs:
           echo "owner=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_OUTPUT"
 
       - name: Build RPMs + push container images (${{ matrix.distro }})
+        # Rocky only supports SHS 14.0.1; skip it for any other dispatched version
+        # (on push there is no input, so inputs.shs_ver is empty and rocky runs).
+        if: ${{ matrix.distro != 'rocky' || inputs.shs_ver == '' || inputs.shs_ver == '14.0.1' }}
         uses: docker/bake-action@v6
         env:
           SHS_VER: ${{ steps.ctx.outputs.shs_ver }}
@@ -73,6 +73,7 @@ jobs:
             *.cache-to=type=gha,mode=max,scope=${{ matrix.distro }}-${{ steps.ctx.outputs.shs_ver }}
 
       - name: Upload RPM artifacts (${{ matrix.distro }})
+        if: ${{ matrix.distro != 'rocky' || inputs.shs_ver == '' || inputs.shs_ver == '14.0.1' }}
         uses: actions/upload-artifact@v4
         with:
           name: rpms-${{ matrix.distro }}-${{ steps.ctx.outputs.shs_ver }}
