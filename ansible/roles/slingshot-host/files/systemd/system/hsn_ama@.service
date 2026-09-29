@@ -1,0 +1,15 @@
+[Unit]
+Description=CXI Algorithmic MAC and IP Address configuration on %I
+IgnoreOnIsolate=yes
+BindsTo=sys-subsystem-net-devices-%i.device
+After=sys-subsystem-net-devices-%i.device
+Before=hsn-online.target
+Requires=lldpad.socket
+
+[Service]
+Type=oneshot
+TimeoutStartSec=60
+ExecStart=/usr/local/sbin/hsn-ama-config.sh %i
+
+[Install]
+RequiredBy=hsn-online.target

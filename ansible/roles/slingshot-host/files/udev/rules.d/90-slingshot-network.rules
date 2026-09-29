@@ -1,0 +1,1 @@
+ACTION=="add", SUBSYSTEM=="net", SUBSYSTEMS=="pci", DRIVERS=="?*", PROGRAM="/etc/udev/rules.d/90-slingshot-network.sh $kernel" NAME="$result"

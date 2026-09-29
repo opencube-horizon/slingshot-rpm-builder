@@ -1,0 +1,6 @@
+---
+- name: Deploy Slingshot Host Software
+  hosts: all
+  gather_facts: true
+  roles:
+    - slingshot-host

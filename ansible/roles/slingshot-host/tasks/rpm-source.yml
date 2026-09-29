@@ -1,0 +1,70 @@
+---
+- name: Resolve RPM source
+  become: true
+  block:
+    - name: Use the provided repository URL directly
+      ansible.builtin.set_fact:
+        slingshot_host_effective_repo_url: "{{ slingshot_host_repo_url }}"
+      when: slingshot_host_rpm_source == 'repo'
+
+    - name: Stage RPMs from controller or image
+      when: slingshot_host_rpm_source in ['local_dir', 'image']
+      block:
+        - name: Ensure staging directory exists
+          ansible.builtin.file:
+            path: "{{ slingshot_host_stage_dir }}"
+            state: directory
+            mode: '0755'
+
+        - name: Fail when local_dir source is not configured
+          ansible.builtin.assert:
+            that: slingshot_host_rpm_local_dir | length > 0
+            fail_msg: "slingshot_host_rpm_local_dir must be set for the 'local_dir' source"
+          when: slingshot_host_rpm_source == 'local_dir'
+
+        - name: Copy RPM tree from the controller
+          ansible.posix.synchronize:
+            src: "{{ slingshot_host_rpm_local_dir.rstrip('/') }}/"
+            dest: "{{ slingshot_host_stage_dir }}/"
+            archive: true
+            delete: true
+          when: slingshot_host_rpm_source == 'local_dir'
+
+        - name: Ensure skopeo is available
+          ansible.builtin.package:
+            name: skopeo
+            state: present
+          when: slingshot_host_rpm_source == 'image'
+
+        - name: Unpack the RPM image onto the host
+          ansible.builtin.shell:
+            cmd: |
+              set -euo pipefail
+              tmp="$(mktemp -d)"
+              trap 'rm -rf "$tmp"' EXIT
+              skopeo copy "docker://{{ slingshot_host_rpm_image }}" "dir:$tmp"
+              for blob in $(python3 -c "import json;print('\n'.join(l['digest'].split(':')[1] for l in json.load(open('$tmp/manifest.json'))['layers']))"); do
+                tar -xf "$tmp/$blob" -C "{{ slingshot_host_stage_dir }}"
+              done
+            executable: /bin/bash
+          register: slingshot_host_image_unpack
+          changed_when: true
+          when: slingshot_host_rpm_source == 'image'
+
+        - name: Locate the repository metadata within the staged tree
+          ansible.builtin.shell:
+            cmd: |
+              set -euo pipefail
+              dirname "$(find "{{ slingshot_host_stage_dir }}" -type d -name repodata | head -1)"
+            executable: /bin/bash
+          register: slingshot_host_repodata_dir
+          changed_when: false
+
+        - name: Fail when no repodata was found in the staged tree
+          ansible.builtin.assert:
+            that: slingshot_host_repodata_dir.stdout | length > 0
+            fail_msg: "No repodata/ directory found under {{ slingshot_host_stage_dir }}"
+
+        - name: Point the repository at the staged tree
+          ansible.builtin.set_fact:
+            slingshot_host_effective_repo_url: "file://{{ slingshot_host_repodata_dir.stdout }}"

@@ -1,0 +1,32 @@
+---
+slingshot_host_distro_tag: rocky
+
+slingshot_host_kmod_packages:
+  - kmod-sl-driver
+  - kmod-cray-cxi-driver
+
+slingshot_host_base_packages:
+  - cray-cxi-driver-udev
+  - slingshot-network-config
+  - libfabric-devel
+  - sl-driver-devel
+  - cray-libcxi-devel
+  - cray-libcxi-utils
+
+slingshot_host_kfabric_packages:
+  - kmod-cray-kfabric
+  - cray-kfabric-udev
+
+slingshot_host_lldp_package: lldpad
+
+slingshot_host_firmware_packages_default: []
+
+slingshot_host_initramfs_packages_absent:
+  - slingshot-network-config-full
+  - cray-libcxi-dracut
+
+slingshot_host_initrd_rebuild_cmd: dracut --force
+
+slingshot_host_lustre_packages:
+  - lustre-client
+  - kmod-lustre-client

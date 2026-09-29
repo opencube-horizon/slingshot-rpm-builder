@@ -1,0 +1,33 @@
+---
+slingshot_host_distro_tag: suse
+
+slingshot_host_kmod_packages:
+  - sl-driver-kmp-default
+  - cray-cxi-driver-kmp-default
+
+slingshot_host_base_packages:
+  - cray-cxi-driver-udev
+  - slingshot-network-config
+  - libfabric-devel
+  - sl-driver-devel
+  - cray-libcxi-devel
+  - cray-libcxi-utils
+
+slingshot_host_kfabric_packages:
+  - cray-kfabric-kmp-default
+  - cray-kfabric-udev
+
+slingshot_host_lldp_package: open-lldp
+
+slingshot_host_firmware_packages_default:
+  - slingshot-firmware-cassini
+
+slingshot_host_initramfs_packages_absent:
+  - slingshot-network-config-full
+  - cray-libcxi-dracut
+
+slingshot_host_initrd_rebuild_cmd: mkinitrd
+
+slingshot_host_lustre_packages:
+  - lustre-client
+  - lustre-client-kmp-default

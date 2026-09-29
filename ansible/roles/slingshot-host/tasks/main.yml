@@ -1,0 +1,240 @@
+---
+- name: Load distribution-specific package names
+  ansible.builtin.include_vars: "{{ ansible_facts['os_family'] }}.yml"
+
+- name: Resolve the Slingshot RPM source
+  ansible.builtin.include_tasks: rpm-source.yml
+
+- name: Slingshot setup
+  become: true
+  block:
+    - name: Setup Slingshot repository (zypper)
+      community.general.zypper_repository:
+        name: "shs-{{ slingshot_host_version }}"
+        repo: "{{ slingshot_host_effective_repo_url }}"
+        autorefresh: true
+        disable_gpg_check: true
+        priority: 50
+        state: present
+      when: ansible_facts['os_family'] == 'Suse'
+
+    - name: Setup Slingshot repository (dnf)
+      ansible.builtin.yum_repository:
+        name: "shs-{{ slingshot_host_version }}"
+        description: "Slingshot Host Software {{ slingshot_host_version }}"
+        baseurl: "{{ slingshot_host_effective_repo_url }}"
+        gpgcheck: false
+        priority: 50
+        enabled: true
+      when: ansible_facts['os_family'] == 'RedHat'
+
+    - name: Remove initramfs-based Slingshot packages if present
+      ansible.builtin.package:
+        name: "{{ slingshot_host_initramfs_packages_absent }}"
+        state: absent
+
+    - name: Stage manually-provided firmware RPMs
+      when: (slingshot_host_firmware_dir | length > 0) or (slingshot_host_firmware_image | length > 0)
+      block:
+        - name: Ensure firmware staging directory exists
+          ansible.builtin.file:
+            path: "{{ slingshot_host_stage_dir }}/firmware"
+            state: directory
+            mode: '0755'
+
+        - name: Copy firmware RPMs to the host
+          ansible.builtin.copy:
+            src: "{{ item }}"
+            dest: "{{ slingshot_host_stage_dir }}/firmware/"
+            mode: preserve
+          with_fileglob:
+            - "{{ slingshot_host_firmware_dir.rstrip('/') }}/*.rpm"
+          when: slingshot_host_firmware_dir | length > 0
+
+        - name: Ensure skopeo is available for firmware image unpack
+          ansible.builtin.package:
+            name: skopeo
+            state: present
+          when: slingshot_host_firmware_image | length > 0
+
+        - name: Unpack the firmware image onto the host
+          ansible.builtin.shell:
+            cmd: |
+              set -euo pipefail
+              tmp="$(mktemp -d)"
+              trap 'rm -rf "$tmp"' EXIT
+              skopeo copy "docker://{{ slingshot_host_firmware_image }}" "dir:$tmp"
+              for blob in $(python3 -c "import json;print('\n'.join(l['digest'].split(':')[1] for l in json.load(open('$tmp/manifest.json'))['layers']))"); do
+                tar -xf "$tmp/$blob" -C "{{ slingshot_host_stage_dir }}/firmware"
+              done
+            executable: /bin/bash
+          changed_when: true
+          when: slingshot_host_firmware_image | length > 0
+
+        - name: Collect staged firmware RPM paths
+          ansible.builtin.find:
+            paths: "{{ slingshot_host_stage_dir }}/firmware"
+            patterns: "*.rpm"
+            recurse: true
+          register: slingshot_host_firmware_find
+
+        - name: Register staged firmware RPM paths
+          ansible.builtin.set_fact:
+            slingshot_host_firmware_files: "{{ slingshot_host_firmware_find.files | map(attribute='path') | list }}"
+
+    - name: Compose the Slingshot install package set
+      ansible.builtin.set_fact:
+        slingshot_host_install_packages: "{{ slingshot_host_kmod_packages
+                  + slingshot_host_base_packages
+                  + (slingshot_host_kfabric_packages if slingshot_host_lustre_client else [])
+                  + slingshot_host_firmware_packages
+                  + slingshot_host_firmware_files
+                  + [slingshot_host_lldp_package] }}"
+
+    - name: Install Slingshot Host Software packages (dnf)
+      ansible.builtin.dnf:
+        name: "{{ slingshot_host_install_packages }}"
+        state: latest
+        disable_gpg_check: true
+      when: ansible_facts['os_family'] == 'RedHat'
+
+    - name: Install Slingshot Host Software packages (zypper)
+      community.general.zypper:
+        name: "{{ slingshot_host_install_packages }}"
+        state: latest
+        disable_gpg_check: true
+      when: ansible_facts['os_family'] == 'Suse'
+
+    - name: Install AMA config script
+      ansible.builtin.copy:
+        src: files/hsn-ama-config.sh
+        dest: /usr/local/sbin/hsn-ama-config.sh
+        mode: '0755'
+        owner: root
+        group: root
+      notify: Restart hsn_ama@hsn0.service
+
+    - name: Install CXI/HSN systemd units and overrides
+      ansible.builtin.copy:
+        src: files/systemd/system/
+        dest: /etc/systemd/system/
+        mode: '0644'
+        directory_mode: '0755'
+        owner: root
+        group: root
+      notify:
+        - Reload systemd
+        - Reenable hsn_ama@hsn0.service
+        - Reenable hsn-overlay-up.service
+
+    - name: Ensure /etc/iproute2 directory exists
+      ansible.builtin.file:
+        dest: /etc/iproute2/
+        state: directory
+        mode: '0755'
+
+    - name: Ensure /etc/iproute2/rt_tables exists (seeded from the system copy)
+      ansible.builtin.copy:
+        dest: /etc/iproute2/rt_tables
+        src: /usr/share/iproute2/rt_tables
+        remote_src: true
+        force: false
+
+    - name: Ensure link to udev renaming rule is absent
+      ansible.builtin.file:
+        dest: /usr/lib/udev/rules.d/99-slingshot-network.rules
+        state: absent
+
+    - name: Install Slingshot AMA udev rule
+      ansible.builtin.copy:
+        src: files/udev/rules.d/
+        dest: /etc/udev/rules.d/
+        owner: root
+        group: root
+        mode: preserve
+        directory_mode: '0755'
+      notify: Reload udev
+
+    - name: Ensure Slingshot ethernet device is brought up by Wicked
+      ansible.builtin.copy:
+        content: |
+            STARTMODE=auto
+            BOOTPROTO=static
+            ZONE=trusted
+        dest: /etc/sysconfig/network/ifcfg-hsn0
+        mode: '0644'
+        owner: root
+        group: root
+      when: not slingshot_host_use_networkmanager
+
+    - name: Ensure Slingshot ethernet device is not managed by NetworkManager
+      ansible.builtin.copy:
+        content: |
+            [device-hsn0-unmanaged]
+            match-device=interface-name:hsn0
+            managed=0
+        dest: /etc/NetworkManager/conf.d/90-hsn0-unmanaged.conf
+        mode: '0644'
+        owner: root
+        group: root
+      when: slingshot_host_use_networkmanager
+
+    - name: Allow lldpad under SELinux (RedHat-family)
+      when:
+        - ansible_facts['os_family'] == 'RedHat'
+        - ansible_facts['selinux'] is defined
+        - ansible_facts['selinux'].status == 'enabled'
+      block:
+        - name: Ensure semanage is available
+          ansible.builtin.package:
+            name: policycoreutils-python-utils
+            state: present
+
+        - name: Set the lldpad SELinux domain permissive
+          community.general.selinux_permissive:
+            domain: lldpad_t
+            permissive: true
+
+    - name: Setup hsn_ama@hsn0.service
+      ansible.builtin.service:
+        name: hsn_ama@hsn0
+        enabled: true
+
+    - name: Setup hsn-overlay-up.service
+      ansible.builtin.service:
+        name: hsn-overlay-up
+        enabled: true
+      when: slingshot_host_hsn_overlay
+
+- name: Lustre setup
+  become: true
+  when: slingshot_host_lustre_client
+  block:
+    - name: Install Lustre packages
+      ansible.builtin.package:
+        name: "{{ slingshot_host_lustre_packages }}"
+        state: latest
+
+    - name: Ensure the earlier Lustre modprobe file is absent
+      ansible.builtin.file:
+        dest: /etc/modprobe.d/99-lustre.conf
+        state: absent
+
+    - name: Write Lustre network config
+      ansible.builtin.copy:
+        content: |
+          net:
+            - net type: kfi0
+              local NI(s):
+                - interfaces:
+                    0: cxi0
+        dest: /etc/lnet.conf
+        mode: '0644'
+        owner: root
+        group: root
+      notify: Reload lnet
+
+    - name: Setup lnet.service
+      ansible.builtin.service:
+        name: lnet
+        enabled: true

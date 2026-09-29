@@ -1,0 +1,46 @@
+---
+slingshot_host_version: 14.0.1
+
+# Where the Slingshot Host Software RPMs come from. One of:
+#   repo      - point at an existing repository (repodata present); no staging.
+#   local_dir - a directory on the Ansible controller, pushed to the target host.
+#   image     - an OCI/Docker image whose root is the RPM tree; unpacked on the host.
+slingshot_host_rpm_source: repo
+
+# 'repo' mode: any zypper/dnf-supported URL (nfs://, http(s)://, file://, ...).
+slingshot_host_repo_url: "nfs://stor1.can.pt.horizon-opencube.eu/shared/repos/slingshot-host-software-{{ slingshot_host_version }}-sle{{ ansible_facts['distribution_major_version'] }}-sp{{ ansible_facts['distribution_release'] }}"
+
+# 'local_dir' mode: directory on the controller containing the RPM tree + repodata/.
+# Defaults to this repo's multi-arch build output for the target's distro and arch.
+slingshot_host_rpm_local_dir: "{{ playbook_dir }}/../RPMS.{{ slingshot_host_distro_tag }}.{{ slingshot_host_version }}/linux_{{ 'arm64' if ansible_facts['architecture'] == 'aarch64' else 'amd64' }}"
+
+# 'image' mode: image reference to unpack on the target host.
+slingshot_host_rpm_image: "slingshot-rpms-{{ ansible_facts['distribution'] | lower }}:{{ slingshot_host_version }}"
+
+# Staging directory on the target host for local_dir/image modes.
+slingshot_host_stage_dir: /var/lib/slingshot-host/repo
+
+slingshot_host_lustre_client: false
+
+# Firmware packages to install. Cassini firmware is a vendor package that only
+# ships via the 'repo' source, so it defaults to empty for locally-built sources.
+slingshot_host_firmware_packages: "{{ slingshot_host_firmware_packages_default }}"
+
+# Directory on the controller holding manually-obtained firmware RPMs
+# (e.g. cray-hms-firmware, slingshot-firmware-cassini). These are not built by
+# this repo; the operator downloads them from the HPE SHS release and drops them
+# into shs-firmware/. Defaults to that dir for the 'local_dir' source; empty
+# otherwise (the 'repo' source carries firmware, 'image' uses a firmware image).
+slingshot_host_firmware_dir: "{{ (playbook_dir ~ '/../shs-firmware') if slingshot_host_rpm_source == 'local_dir' else '' }}"
+
+# 'image' source: separate image whose root holds the firmware RPMs, unpacked on
+# the host. No default; the operator supplies it when using the image source.
+slingshot_host_firmware_image: ""
+slingshot_host_firmware_files: []
+
+# Host network stack: SUSE Wicked by default, NetworkManager on RedHat-family.
+# Override explicitly for hosts that diverge from their distro default.
+slingshot_host_use_networkmanager: "{{ ansible_facts['os_family'] == 'RedHat' }}"
+
+# Enable only where an 'hsn-overlay' NetworkManager connection is configured.
+slingshot_host_hsn_overlay: false

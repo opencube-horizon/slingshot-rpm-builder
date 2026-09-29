@@ -1,0 +1,15 @@
+[Unit]
+Description=Activate HSN overlay VXLAN and bridge after HSN is online
+After=hsn-online.target NetworkManager.service
+Wants=hsn-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/nmcli con up hsn-overlay
+ExecStart=/usr/bin/nmcli con up hsn-overlay-vxp
+ExecStop=/usr/bin/nmcli con down hsn-overlay
+ExecStop=/usr/bin/nmcli con down hsn-overlay-vxp
+
+[Install]
+WantedBy=multi-user.target

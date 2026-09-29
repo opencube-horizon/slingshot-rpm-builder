@@ -1,0 +1,37 @@
+---
+- name: Rebuild initrd
+  become: true
+  ansible.builtin.command:
+    cmd: "{{ slingshot_host_initrd_rebuild_cmd }}"
+
+- name: Reload systemd
+  become: true
+  ansible.builtin.systemd_service:
+    daemon_reload: true
+
+- name: Reenable hsn_ama@hsn0.service
+  become: true
+  ansible.builtin.command:
+    cmd: systemctl reenable hsn_ama@hsn0.service
+
+- name: Restart hsn_ama@hsn0.service
+  become: true
+  ansible.builtin.systemd_service:
+    name: hsn_ama@hsn0.service
+    state: restarted
+
+- name: Reenable hsn-overlay-up.service
+  become: true
+  ansible.builtin.command:
+    cmd: systemctl reenable hsn-overlay-up.service
+
+- name: Reload udev
+  become: true
+  ansible.builtin.command:
+    cmd: udevadm control --reload-rules
+
+- name: Reload lnet
+  become: true
+  ansible.builtin.service:
+    name: lnet
+    state: restarted
