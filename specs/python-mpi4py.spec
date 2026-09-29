@@ -9,7 +9,12 @@ License:        BSD-2-Clause
 URL:            https://github.com/mpi4py/mpi4py
 Source0:        mpi4py-%{version}.tar.gz
 
+# openSUSE Leap 16 ships only fully-versioned python313-devel; EL provides python3-devel
+%if 0%{?suse_version}
+BuildRequires:  python313-devel
+%else
 BuildRequires:  python3-devel
+%endif
 BuildRequires:  python3-setuptools
 BuildRequires:  python3-Cython
 BuildRequires:  %{mpi_flavor}-devel

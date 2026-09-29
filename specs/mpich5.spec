@@ -13,7 +13,12 @@ BuildRequires:  gcc-c++
 BuildRequires:  gcc-fortran
 BuildRequires:  python3
 BuildRequires:  hwloc-devel
+# openSUSE calls it libnuma-devel; EL ships the same headers in numactl-devel
+%if 0%{?suse_version}
 BuildRequires:  libnuma-devel
+%else
+BuildRequires:  numactl-devel
+%endif
 BuildRequires:  libfabric-devel
 
 Requires:       libfabric
@@ -50,7 +55,13 @@ with MPICH 5.x.
   --enable-fortran=all \
   --enable-romio \
   --disable-dependency-tracking \
+%if 0%{?suse_version}
   FFLAGS="-w" FCFLAGS="-w"
+%else
+  # EL forces -pie at link; keep the distro Fortran flags (incl. -fPIE) and only append -w,
+  # otherwise a bare -w drops PIE codegen and the hardened linker rejects the objects
+  FFLAGS="%{build_fflags} -w" FCFLAGS="%{build_fflags} -w"
+%endif
 
 %make_build
 

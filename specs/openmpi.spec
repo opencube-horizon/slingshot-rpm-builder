@@ -13,7 +13,12 @@ BuildRequires:  gcc-c++
 BuildRequires:  gcc-fortran
 BuildRequires:  python3
 BuildRequires:  hwloc-devel
+# openSUSE calls it libnuma-devel; EL ships the same headers in numactl-devel
+%if 0%{?suse_version}
 BuildRequires:  libnuma-devel
+%else
+BuildRequires:  numactl-devel
+%endif
 BuildRequires:  libevent-devel
 BuildRequires:  libfabric-devel
 BuildRequires:  pmix-devel
@@ -55,7 +60,13 @@ with Open MPI.
   --disable-static \
   --enable-mpi-fortran=all \
   --disable-dependency-tracking \
+%if 0%{?suse_version}
   FFLAGS="-w" FCFLAGS="-w"
+%else
+  # EL forces -pie at link; keep the distro Fortran flags (incl. -fPIE) and only append -w,
+  # otherwise a bare -w drops PIE codegen and the hardened linker rejects the objects
+  FFLAGS="%{build_fflags} -w" FCFLAGS="%{build_fflags} -w"
+%endif
 
 %make_build
 
@@ -133,6 +144,10 @@ EOF
 %{_libdir}/openmpi/bin/mpif90
 %{_libdir}/openmpi/bin/mpifort
 %{_libdir}/openmpi/bin/pmixcc
+%if !0%{?suse_version}
+# EL's bundled openpmix installs a 'pcc' compiler-wrapper alias; SUSE's doesn't.
+%{_libdir}/openmpi/bin/pcc
+%endif
 %{_libdir}/openmpi/pkgconfig/
 %{_libdir}/openmpi/*.mod
 

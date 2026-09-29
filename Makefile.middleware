@@ -12,6 +12,11 @@
 ARCH := $(shell uname -m)
 TOPDIR := $(CURDIR)/rpmbuild
 
+# EL's check-rpaths brp rejects the standard rpath '/usr/lib' that mercury/isa-l
+# libs need at runtime (they install to a non-standard libdir); accept it here
+# (QA_RPATHS is a no-op on SUSE, which doesn't run check-rpaths).
+export QA_RPATHS := 0x0011
+
 # ─── Package versions ────────────────────────────────────────────────────────
 ARGOBOTS_VER := 1.2
 MERCURY_VER  := 2.4.1
@@ -34,7 +39,7 @@ URL_mpi4py   := https://github.com/mpi4py/mpi4py/releases/download/$(MPI4PY_VER)
 URL_isal     := https://github.com/intel/isa-l/archive/refs/tags/v$(ISAL_VER).tar.gz
 URL_isal_crypto := https://github.com/intel/isa-l_crypto/archive/refs/tags/v$(ISAL_CRYPTO_VER).tar.gz
 URL_fused    := https://github.com/daos-stack/fused/archive/refs/tags/v$(FUSED_VER).tar.gz
-URL_daos     := https://github.com/daos-stack/daos/archive/refs/heads/release/2.8.tar.gz
+URL_daos     := https://github.com/daos-stack/daos/archive/refs/tags/v$(DAOS_VER).tar.gz
 
 # ─── Targets ─────────────────────────────────────────────────────────────────
 all: rpmbuild/RPMS/repodata/repomd.xml
@@ -234,6 +239,9 @@ $(DAOS_RPM): src/daos mercury-install argobots-install isal-install isal-crypto-
 	# Step 1: Fix package names and remove unsatisfiable BuildRequires
 	sed -i \
 	  -e 's/libabt-devel/argobots-devel/' \
+	  -e 's/^BuildRequires: python3-devel$$/BuildRequires: python313-devel/' \
+	  -e 's/^BuildRequires: isa-l-devel$$/BuildRequires: libisal-devel/' \
+	  -e 's/^BuildRequires: libisa-l_crypto-devel$$/BuildRequires: libisal_crypto-devel/' \
 	  -e '/BuildRequires:.*fused-devel/d' \
 	  -e '/^BuildRequires:.*%{openmpi}-devel/d' \
 	  -e '/^BuildRequires:.*hdf5-devel/d' \
