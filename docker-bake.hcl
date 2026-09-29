@@ -26,8 +26,11 @@ variable "SHS_VER" {
   default = "14.0.1"
 }
 
+# Comma-separated so it can be overridden from a plain env var / make variable
+# (bake env overrides match by name); split() turns it into the list bake wants.
+# CI restricts this to a single distro per matrix leg, e.g. DISTROS=suse.
 variable "DISTROS" {
-  default = ["suse", "rocky"]
+  default = "suse,rocky"
 }
 
 # Comma-separated so it can be overridden from a plain env var / make variable
@@ -64,7 +67,7 @@ group "containers" {
 # Emits the `rpms` scratch stage (RPM tree at image root: /<arch>/, /noarch/).
 target "shs" {
   name       = "shs-${distro}"
-  matrix     = { distro = DISTROS }
+  matrix     = { distro = split(",", DISTROS) }
   dockerfile = "Dockerfile.${distro}"
   context    = "."
   target     = "rpms"
@@ -83,7 +86,7 @@ target "shs" {
 # per-arch RPM set is selected automatically for each platform.
 target "middleware" {
   name       = "middleware-${distro}"
-  matrix     = { distro = DISTROS }
+  matrix     = { distro = split(",", DISTROS) }
   dockerfile = "Dockerfile.middleware.${distro}"
   context    = "."
   target     = "rpms"
@@ -109,7 +112,7 @@ target "_container" {
 
 target "runtime" {
   name       = "runtime-${distro}"
-  matrix     = { distro = DISTROS }
+  matrix     = { distro = split(",", DISTROS) }
   inherits   = ["_container"]
   dockerfile = "Dockerfile.${distro}"
   target     = "runtime"
@@ -117,12 +120,12 @@ target "runtime" {
     SHS_VER = SHS_VER
     DISTRO  = distro
   }
-  tags = ["${REGISTRY_AND_PROJECT}slingshot-runtime-${distro}"]
+  tags = ["${REGISTRY_AND_PROJECT}slingshot-runtime-${distro}:${SHS_VER}"]
 }
 
 target "runtime-dev" {
   name       = "runtime-dev-${distro}"
-  matrix     = { distro = DISTROS }
+  matrix     = { distro = split(",", DISTROS) }
   inherits   = ["_container"]
   dockerfile = "Dockerfile.${distro}"
   target     = "runtime-dev"
@@ -130,12 +133,12 @@ target "runtime-dev" {
     SHS_VER = SHS_VER
     DISTRO  = distro
   }
-  tags = ["${REGISTRY_AND_PROJECT}slingshot-runtime-devel-${distro}"]
+  tags = ["${REGISTRY_AND_PROJECT}slingshot-runtime-devel-${distro}:${SHS_VER}"]
 }
 
 target "ops" {
   name       = "ops-${distro}"
-  matrix     = { distro = DISTROS }
+  matrix     = { distro = split(",", DISTROS) }
   inherits   = ["_container"]
   dockerfile = "Dockerfile.${distro}"
   target     = "ops"
@@ -143,5 +146,5 @@ target "ops" {
     SHS_VER = SHS_VER
     DISTRO  = distro
   }
-  tags = ["${REGISTRY_AND_PROJECT}slingshot-ops-${distro}"]
+  tags = ["${REGISTRY_AND_PROJECT}slingshot-ops-${distro}:${SHS_VER}"]
 }
