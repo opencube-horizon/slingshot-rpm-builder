@@ -20,7 +20,7 @@ for attempt in $(seq 1 $TRIES) ; do
      && /usr/sbin/lldptool set-lldp -i "$IFACE" adminStatus=rxtx \
      && /opt/slingshot/slingshot-network-config/default/bin/slingshot-network-cfg-lldp "$IFACE"
   then
-     /opt/slingshot/slingshot-network-config/default/bin/slingshot-ifroute.sh "$IFACE" || true
+     /opt/slingshot/slingshot-network-config/default/bin/slingshot-ifroute.sh "$IFACE" up || true
      echo "Success on attempt $attempt."
      exit 0
   fi
